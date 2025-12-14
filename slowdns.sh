@@ -1,6 +1,6 @@
 #!/bin/bash
 # Script  By nstaller slowdns
-# 2022 SLOWDNS
+# 2025 SLOWDNS
 # ===============================================
 
 
@@ -16,9 +16,9 @@ rm -rf /root/nsdomain
 rm nsdomain
 
 #input nameserver manual to cloudflare
-read -rp "Masukkan domain: " -e domain
+read -rp "Please enter your domain: " -e domain
 
-read -rp "Masukkan Subdomain: " -e sub
+read -rp "Please enter your Subdomain: " -e sub
 SUB_DOMAIN=${sub}.${domain}
 NS_DOMAIN=slowdns-${SUB_DOMAIN}
 echo $NS_DOMAIN > /root/nsdomain
@@ -73,8 +73,8 @@ cd
 #install client-sldns.service
 cat > /etc/systemd/system/client-sldns.service << END
 [Unit]
-Description=Client SlowDNS By HideSSH
-Documentation=https://hidessh.com
+Description=Client SlowDNS By MOD esimfreegb
+Documentation=vpschiddy.icu
 After=network.target nss-lookup.target
 
 [Service]
@@ -83,7 +83,7 @@ User=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
-ExecStart=/etc/slowdns/sldns-client -udp 8.8.8.8:53 --pubkey-file /etc/slowdns/server.pub $nameserver 127.0.0.1:2222
+ExecStart=/etc/slowdns/sldns-client -udp 1.1.1.1:53 --pubkey-file /etc/slowdns/server.pub -mtu 512 $nameserver 127.0.0.1:2222
 Restart=on-failure
 
 [Install]
@@ -94,8 +94,8 @@ cd
 #install server-sldns.service
 cat > /etc/systemd/system/server-sldns.service << END
 [Unit]
-Description=Server SlowDNS By HideSSH
-Documentation=https://hidessh.com
+Description=Server SlowDNS By MOD esimfreegb
+Documentation=vpschiddy.icu
 After=network.target nss-lookup.target
 
 [Service]
