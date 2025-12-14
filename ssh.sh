@@ -1,7 +1,7 @@
 #!/bin/bash
-#date january 2022
-# created bye hidessh.com
-# Simple
+#date December 2025
+# created by esimfreegb 
+# Contact me: t.me/esimfreegb
 # port Stunnel and Websocket 443 & Slowdns
 # ==================================================
 
@@ -14,13 +14,13 @@ source /etc/os-release
 ver=$VERSION_ID
 
 #detail nama perusahaan
-country=ID
-state=Indonesia
-locality=Indonesia
-organization=hidessh.com
-organizationalunit=hidessh.com
-commonname=hidessh.com
-email=admin@hidessh.com
+country=TZ
+state=TANZANIA
+locality=TANZANIA
+organization=www.vpschiddy.icu
+organizationalunit=de1.vpschiddy.icu
+commonname=esimfreegb
+email=rashidkamote95@gmail.com
 
 # simple password minimal
 wget -O /etc/pam.d/common-password "https://gitlab.com/hidessh/baru/-/raw/main/password"
