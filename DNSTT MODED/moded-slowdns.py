@@ -1,324 +1,254 @@
 #!/usr/bin/env python3
 """
-FULL SLOWDNS + EDNS PROXY STACK - Debian 10 Compatible
-Fixed version for non-interactive install
+OpenSSH + SlowDNS Installation Script
+Python version of the bash script
 """
 
-import os, subprocess, sys, time, socket, selectors, struct, shutil
+import os
+import subprocess
+import sys
+import time
+import shutil
 from pathlib import Path
-from collections import defaultdict
 
 # ================= CONFIG =================
 SSHD_PORT = 22
 SLOWDNS_PORT = 5300
-EDNS_LISTEN_PORT = 53
-EDNS_EXTERNAL = 512
-EDNS_INTERNAL = 1232
-WORKERS = max(os.cpu_count() or 2, 1)
-INSTALL_DIR = "/opt/slowdns"
-EDNS_PROXY_PATH = f"{INSTALL_DIR}/edns_proxy.py"
+
+# Download URLs
+SERVER_KEY_URL = "https://raw.githubusercontent.com/athumani2580/DNS/main/slowdns/server.key"
+SERVER_KEY_ALT = "https://raw.githubusercontent.com/athumani2580/DNS/main/server.key"
+SERVER_PUB_URL = "https://raw.githubusercontent.com/athumani2580/DNS/main/slowdns/server.pub"
+SERVER_PUB_ALT = "https://raw.githubusercontent.com/athumani2580/DNS/main/server.pub"
+SERVER_BIN_URL = "https://raw.githubusercontent.com/athumani2580/DNS/main/slowdns/sldns-server"
+SERVER_BIN_ALT = "https://raw.githubusercontent.com/athumani2580/DNS/main/slowdns/sldns-server"
+
 SLOWDNS_DIR = "/etc/slowdns"
-SLOWDNS_BIN = f"{SLOWDNS_DIR}/dnstt-server"
+SLOWDNS_BIN = f"{SLOWDNS_DIR}/sldns-server"
 
-# GitHub raw URLs (URL encoded spaces)
-SERVER_KEY_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key"
-SERVER_PUB_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub"
-SERVER_BIN_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server"
+# ================= UTILITIES =================
+def print_message(msg, prefix="[+]"):
+    """Print colored message"""
+    colors = {
+        'green': '\033[92m',
+        'yellow': '\033[93m',
+        'cyan': '\033[96m',
+        'white': '\033[97m',
+        'red': '\033[91m',
+        'nc': '\033[0m',
+        'blue': '\033[94m'
+    }
+    print(f"{colors['cyan']}{prefix}{colors['nc']} {msg}")
 
-# DNS Nameserver - CHANGE THIS TO YOUR DOMAIN
-DNS_HOSTNAME = "YOUR_DOMAIN_HERE.com"  # <<< REPLACE WITH YOUR DOMAIN
+def print_success(msg):
+    print_message(msg, prefix="[✓]")
 
-# ================= UTIL =================
-def run(cmd, check=False, capture=True, verbose=False):
-    """Run shell command safely"""
-    if verbose:
-        print(f"[$] {cmd}")
+def print_error(msg):
+    print_message(msg, prefix="[✗]")
+
+def run_cmd(cmd, check=True, capture_output=True):
+    """Run shell command"""
     try:
-        result = subprocess.run(cmd, shell=True, check=False,
-                               capture_output=capture, text=True,
-                               executable="/bin/bash")
-        if check and result.returncode != 0:
-            print(f"[!] Command failed ({result.returncode}): {cmd}")
-            if result.stderr:
-                print(f"    Error: {result.stderr[:200]}")
+        result = subprocess.run(cmd, shell=True, check=check, 
+                              capture_output=capture_output, text=True)
         return result
-    except Exception as e:
-        print(f"[!] Exception running command: {e}")
-        return subprocess.CompletedProcess(cmd, 1, "", str(e))
+    except subprocess.CalledProcessError as e:
+        print_error(f"Command failed: {cmd}")
+        print_error(f"Error: {e.stderr}")
+        if check:
+            raise
+        return e
 
 def root_check():
+    """Check if running as root"""
     if os.geteuid() != 0:
-        print("[!] Must be root")
+        print_error("This script must be run as root")
         sys.exit(1)
 
-def service_exists(name):
-    result = run(f"systemctl list-unit-files '{name}.service' 2>/dev/null | grep -q '^{name}'", capture=True)
+def service_is_active(service_name):
+    """Check if a systemd service is active"""
+    result = run_cmd(f"systemctl is-active {service_name}", check=False)
     return result.returncode == 0
 
-def fix_debian_sources():
-    """Fix Debian 10 repositories"""
-    src_file = "/etc/apt/sources.list"
-    if not os.path.exists(src_file):
-        return
-    
-    with open(src_file, 'r') as f:
-        content = f.read()
-    
-    # Replace active repos with archive
-    replacements = [
-        ('http://deb.debian.org/debian', 'http://archive.debian.org/debian'),
-        ('https://deb.debian.org/debian', 'http://archive.debian.org/debian'),
-        ('http://security.debian.org', 'http://archive.debian.org/debian-security'),
-        ('https://security.debian.org', 'http://archive.debian.org/debian-security'),
-    ]
-    
-    for old, new in replacements:
-        content = content.replace(old, new)
-    
-    with open(src_file, 'w') as f:
-        f.write(content)
-    
-    print("[+] Updated sources.list for Debian archive")
+def download_file(url, destination, alt_url=None):
+    """Download file with fallback URL"""
+    try:
+        print_message(f"Downloading {os.path.basename(destination)}...")
+        
+        # Try wget first
+        cmd = f"wget -q -O '{destination}' '{url}'"
+        result = run_cmd(cmd, check=False)
+        
+        if result.returncode != 0 and alt_url:
+            print_message("Trying alternative URL...")
+            cmd = f"wget -q -O '{destination}' '{alt_url}'"
+            result = run_cmd(cmd, check=False)
+        
+        if result.returncode == 0:
+            print_success(f"{os.path.basename(destination)} downloaded")
+            return True
+        else:
+            # Try curl as last resort
+            cmd = f"curl -s -o '{destination}' '{url}'"
+            result = run_cmd(cmd, check=False)
+            if result.returncode == 0:
+                print_success(f"{os.path.basename(destination)} downloaded")
+                return True
+        
+        print_error(f"Failed to download {os.path.basename(destination)}")
+        return False
+    except Exception as e:
+        print_error(f"Download error: {e}")
+        return False
 
-# ================= EDNS PROXY =================
-EDNS_PROXY_CODE = '''#!/usr/bin/env python3
-import socket, selectors, struct, time, os, sys
-from collections import defaultdict
-
-LISTEN=("0.0.0.0",53)
-UPSTREAM=("127.0.0.1",5300)
-EXTERNAL=512
-INTERNAL=1232
-TIMEOUT=5
-RATE=50
-BURST=100
-
-sel=selectors.DefaultSelector()
-pending={}
-clients=defaultdict(lambda:[BURST,0])
-
-def allow(ip,now):
-    t,l=clients[ip]
-    t=min(BURST,t+(now-l)*RATE)
-    if t<1:
-        clients[ip]=[t,now]; return False
-    clients[ip]=[t-1,now]; return True
-
-def nid(): return os.urandom(2)
-
-def patch(data,size):
-    if len(data)<12: return data
-    ar=struct.unpack("!H",data[10:12])[0]
-    if ar==0: return data
-    off=12
-    def skip(b,i):
-        while i<len(b):
-            l=b[i]; i+=1
-            if l==0: return i
-            if l&0xC0: return i+1
-            i+=l
-        return i
-    qd,an,ns=struct.unpack("!HHH",data[4:10])
-    for _ in range(qd): off=skip(data,off)+4
-    for _ in range(an+ns):
-        off=skip(data,off)
-        off+=10+struct.unpack("!H",data[off+8:off+10])[0]
-    for _ in range(ar):
-        n=skip(data,off)
-        if struct.unpack("!H",data[n:n+2])[0]==41:
-            b=bytearray(data)
-            b[n+2:n+4]=struct.pack("!H",size)
-            return bytes(b)
-        off=n+10+struct.unpack("!H",data[n+8:n+10])[0]
-    return data
-
-try:
-    ls=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-    ls.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-    ls.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT,1)
-    ls.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,4*1024*1024)
-    ls.bind(LISTEN)
-    ls.setblocking(False)
-    
-    us=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-    us.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT,1)
-    us.setblocking(False)
-    
-    sel.register(ls,selectors.EVENT_READ,"c")
-    sel.register(us,selectors.EVENT_READ,"u")
-    
-    print(f"[EDNS] Listening on {LISTEN[0]}:{LISTEN[1]}", flush=True)
-    
-    while True:
-        now=time.time()
-        for k,(_,_,t) in list(pending.items()):
-            if now-t>TIMEOUT:
-                pending.pop(k,None)
-        for key,_ in sel.select(1):
-            if key.data=="c":
-                try:
-                    d,a=ls.recvfrom(4096)
-                    if not allow(a[0],now): continue
-                    cid=d[:2]; pid=nid()
-                    pending[pid]=(cid,a,now)
-                    us.sendto(patch(pid+d[2:],INTERNAL),UPSTREAM)
-                except Exception: pass
-            else:
-                try:
-                    d,_=us.recvfrom(4096)
-                    pid=d[:2]
-                    e=pending.pop(pid,None)
-                    if e:
-                        cid,a,_=e
-                        ls.sendto(patch(cid+d[2:],EXTERNAL),a)
-                except Exception: pass
-except Exception as e:
-    print(f"[EDNS] Fatal: {e}", file=sys.stderr)
-    sys.exit(1)
-'''
-
-# ================= MAIN INSTALL =================
+# ================= MAIN INSTALLATION =================
 def main():
     root_check()
     
+    print("\n" + "="*60)
+    print("OpenSSH + SlowDNS Installation")
     print("="*60)
-    print("SLOWDNS FULL STACK INSTALLER")
-    print(f"Domain: {DNS_HOSTNAME}")
-    print("="*60)
     
-    # ========== STEP 1: SYSTEM PREP ==========
-    print("\n[1] Preparing system...")
-    fix_debian_sources()
+    # ========== STEP 1: DISABLE UFW ==========
+    print("\n[1] Disabling UFW...")
+    run_cmd("ufw disable 2>/dev/null", check=False)
+    if service_is_active("ufw"):
+        run_cmd("systemctl stop ufw", check=False)
+    run_cmd("systemctl disable ufw 2>/dev/null", check=False)
+    print_success("UFW disabled")
     
-    # Update packages
-    result = run("apt-get update -qq", verbose=True)
-    if result.returncode != 0:
-        print("[!] apt update failed, trying without -qq")
-        run("apt-get update", verbose=True)
+    # ========== STEP 2: DISABLE systemd-resolved ==========
+    print("\n[2] Disabling systemd-resolved...")
+    if service_is_active("systemd-resolved"):
+        run_cmd("systemctl stop systemd-resolved", check=False)
+    run_cmd("systemctl disable systemd-resolved 2>/dev/null", check=False)
+    print_success("systemd-resolved disabled")
     
-    # Install required packages
-    print("  Installing packages...")
-    packages = ["openssh-server", "wget", "iptables", "iptables-persistent", "net-tools"]
-    for pkg in packages:
-        run(f"apt-get install -y {pkg} 2>/dev/null || apt-get install -y {pkg} --allow-unauthenticated", 
-            verbose=True)
+    # ========== STEP 3: CONFIGURE DNS ==========
+    print("\n[3] Configuring DNS...")
+    resolv_conf = Path("/etc/resolv.conf")
     
-    # Disable conflicting services
-    for svc in ["ufw", "systemd-resolved"]:
-        run(f"systemctl stop {svc} 2>/dev/null || true", verbose=False)
-        run(f"systemctl disable {svc} 2>/dev/null || true", verbose=False)
+    # Remove if it's a symlink
+    if resolv_conf.is_symlink():
+        try:
+            resolv_conf.unlink()
+        except:
+            pass
     
-    # Fix resolv.conf (Python 3.7 compatible)
-    print("  Configuring DNS...")
+    # Write new resolv.conf
     try:
-        os.unlink("/etc/resolv.conf")
-    except FileNotFoundError:
-        pass
+        with open("/etc/resolv.conf", "w") as f:
+            f.write("nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
+        
+        # Try to make it immutable (may fail, that's OK)
+        run_cmd("chattr +i /etc/resolv.conf 2>/dev/null", check=False)
+        print_success("DNS configured")
     except Exception as e:
-        print(f"  [!] Could not unlink resolv.conf: {e}")
+        print_error(f"Failed to configure DNS: {e}")
     
-    with open("/etc/resolv.conf", "w") as f:
-        f.write("nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
+    # ========== STEP 4: CONFIGURE OPENSSH ==========
+    print(f"\n[4] Configuring OpenSSH on port {SSHD_PORT}...")
     
-    # ========== STEP 2: KERNEL TUNING ==========
-    print("\n[2] Kernel tuning...")
-    sysctl_cmds = [
-        "sysctl -w net.core.rmem_max=134217728",
-        "sysctl -w net.core.wmem_max=134217728",
-        "sysctl -w net.ipv4.ip_local_port_range='1024 65000'",
-        "sysctl -w net.ipv4.tcp_window_scaling=1",
-        "sysctl -w net.ipv4.tcp_timestamps=1",
-        "sysctl -w net.ipv4.tcp_sack=1",
-    ]
+    # Backup original config
+    ssh_config = "/etc/ssh/sshd_config"
+    if os.path.exists(ssh_config):
+        try:
+            shutil.copy2(ssh_config, ssh_config + ".backup")
+            print_success("Backed up original SSH config")
+        except:
+            pass
     
-    for cmd in sysctl_cmds:
-        run(cmd, verbose=False)
-    
-    # Make sysctl persistent
-    sysctl_conf = "/etc/sysctl.d/99-slowdns.conf"
-    with open(sysctl_conf, "w") as f:
-        f.write("""net.core.rmem_max = 134217728
-net.core.wmem_max = 134217728
-net.ipv4.ip_local_port_range = 1024 65000
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_timestamps = 1
-net.ipv4.tcp_sack = 1
-""")
-    
-    # ========== STEP 3: SSH CONFIG ==========
-    print("\n[3] Configuring SSH...")
-    ssh_config = """Port 22
+    # Create new SSH config
+    ssh_config_content = f"""# OpenSSH Configuration - Standard Port 22
+Port {SSHD_PORT}
 Protocol 2
 PermitRootLogin yes
-PasswordAuthentication yes
 PubkeyAuthentication yes
-AllowTcpForwarding yes
-GatewayPorts yes
-PermitTunnel yes
+PasswordAuthentication yes
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+UsePAM yes
 X11Forwarding no
 PrintMotd no
-UseDNS no
-ClientAliveInterval 30
+PrintLastLog yes
+TCPKeepAlive yes
+ClientAliveInterval 60
 ClientAliveCountMax 3
-MaxAuthTries 3
-MaxSessions 10
+AllowTcpForwarding yes
+GatewayPorts yes
+Compression delayed
+Subsystem sftp /usr/lib/openssh/sftp-server
+MaxSessions 100
+MaxStartups 100:30:200
+LoginGraceTime 30
+UseDNS no
 """
     
-    # Backup original
-    if os.path.exists("/etc/ssh/sshd_config"):
-        shutil.copy2("/etc/ssh/sshd_config", "/etc/ssh/sshd_config.backup")
+    try:
+        with open(ssh_config, "w") as f:
+            f.write(ssh_config_content)
+        
+        # Restart SSH
+        run_cmd("systemctl restart sshd", check=False)
+        time.sleep(2)
+        print_success(f"OpenSSH configured on port {SSHD_PORT}")
+    except Exception as e:
+        print_error(f"Failed to configure SSH: {e}")
     
-    with open("/etc/ssh/sshd_config", "w") as f:
-        f.write(ssh_config)
-    
-    # Restart SSH
-    run("systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null", verbose=True)
-    
-    # ========== STEP 4: SLOWDNS INSTALL ==========
-    print("\n[4] Installing SlowDNS...")
+    # ========== STEP 5: SETUP SLOWDNS ==========
+    print("\n[5] Setting up SlowDNS...")
     
     # Create directory
-    Path(SLOWDNS_DIR).mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.rmtree(SLOWDNS_DIR, ignore_errors=True)
+        Path(SLOWDNS_DIR).mkdir(parents=True, exist_ok=True)
+        print_success("SlowDNS directory created")
+    except Exception as e:
+        print_error(f"Failed to create directory: {e}")
+        return
     
-    # Download files with retry logic
-    files = [
-        (SERVER_KEY_URL, f"{SLOWDNS_DIR}/server.key"),
-        (SERVER_PUB_URL, f"{SLOWDNS_DIR}/server.pub"),
-        (SERVER_BIN_URL, SLOWDNS_BIN),
+    # ========== STEP 6: DOWNLOAD FILES ==========
+    print("\n[6] Downloading SlowDNS files...")
+    
+    files_to_download = [
+        (SERVER_KEY_URL, f"{SLOWDNS_DIR}/server.key", SERVER_KEY_ALT),
+        (SERVER_PUB_URL, f"{SLOWDNS_DIR}/server.pub", SERVER_PUB_ALT),
+        (SERVER_BIN_URL, SLOWDNS_BIN, SERVER_BIN_ALT),
     ]
     
-    for url, dest in files:
-        print(f"  Downloading {os.path.basename(dest)}...")
-        # Try wget first, then curl
-        result = run(f"wget -q --timeout=30 --tries=3 -O '{dest}' '{url}'", verbose=False)
-        if result.returncode != 0:
-            result = run(f"curl -s --connect-timeout 30 --retry 3 -o '{dest}' '{url}'", verbose=False)
-        
-        if result.returncode == 0 and os.path.exists(dest):
-            print(f"    ✓ {os.path.basename(dest)}")
-        else:
-            print(f"    ✗ Failed to download {os.path.basename(dest)}")
-            # Create dummy files if download fails
-            if "server.key" in dest:
-                with open(dest, "wb") as f:
-                    f.write(os.urandom(32))
-            elif "server.pub" in dest:
-                with open(dest, "w") as f:
-                    f.write("dummy-public-key-for-testing")
-            elif "dnstt-server" in dest:
-                # Create a dummy binary
-                with open(dest, "w") as f:
-                    f.write("#!/bin/bash\necho 'SlowDNS server placeholder'\nsleep 1")
+    for url, dest, alt_url in files_to_download:
+        if not download_file(url, dest, alt_url):
+            print_error(f"Critical: Could not download {os.path.basename(dest)}")
+            return
     
     # Make binary executable
-    if os.path.exists(SLOWDNS_BIN):
+    try:
         os.chmod(SLOWDNS_BIN, 0o755)
-        print(f"  ✓ Made {SLOWDNS_BIN} executable")
+        print_success("File permissions set")
+    except Exception as e:
+        print_error(f"Failed to set permissions: {e}")
     
-    # ========== STEP 5: SLOWDNS SERVICE ==========
-    print("\n[5] Creating SlowDNS service...")
+    # ========== STEP 7: GET NAMESERVER ==========
+    print("\n" + "="*60)
+    print("[ NAMESERVER SETUP ]")
+    print("="*60)
     
-    slowdns_service = f"""[Unit]
+    nameserver = ""
+    while not nameserver:
+        try:
+            nameserver = input("Enter nameserver (e.g., dns.example.com): ").strip()
+            if not nameserver:
+                print_error("Nameserver cannot be empty")
+        except (EOFError, KeyboardInterrupt):
+            print_error("\nInstallation cancelled")
+            sys.exit(1)
+    
+    print(f"\n[7] Configuring with nameserver: {nameserver}")
+    
+    # ========== STEP 8: CREATE SLOWDNS SERVICE ==========
+    print("\n[8] Creating SlowDNS service...")
+    
+    service_content = f"""[Unit]
 Description=SlowDNS Server
 After=network.target
 Wants=network.target
@@ -327,190 +257,100 @@ Wants=network.target
 Type=simple
 User=root
 WorkingDirectory={SLOWDNS_DIR}
-ExecStart={SLOWDNS_BIN} -udp :{SLOWDNS_PORT} -mtu {EDNS_INTERNAL} -privkey-file {SLOWDNS_DIR}/server.key {DNS_HOSTNAME} 127.0.0.1:{SSHD_PORT}
+ExecStart={SLOWDNS_BIN} -udp :{SLOWDNS_PORT} -mtu 1232 -privkey-file {SLOWDNS_DIR}/server.key {nameserver} 127.0.0.1:{SSHD_PORT}
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=slowdns
 LimitNOFILE=65536
-LimitNPROC=4096
 
 [Install]
 WantedBy=multi-user.target
 """
     
-    with open("/etc/systemd/system/slowdns-server.service", "w") as f:
-        f.write(slowdns_service)
+    try:
+        with open("/etc/systemd/system/slowdns-server.service", "w") as f:
+            f.write(service_content)
+        
+        # Enable and start service
+        run_cmd("systemctl daemon-reload", check=False)
+        run_cmd("systemctl enable slowdns-server.service", check=False)
+        run_cmd("systemctl start slowdns-server.service", check=False)
+        
+        print_success("SlowDNS service created and started")
+    except Exception as e:
+        print_error(f"Failed to create service: {e}")
     
-    print(f"  ✓ Service created for domain: {DNS_HOSTNAME}")
-    
-    # ========== STEP 6: EDNS PROXY ==========
-    print("\n[6] Installing EDNS Proxy...")
-    
-    Path(INSTALL_DIR).mkdir(parents=True, exist_ok=True)
-    
-    # Write proxy code
-    with open(EDNS_PROXY_PATH, "w") as f:
-        f.write(EDNS_PROXY_CODE)
-    os.chmod(EDNS_PROXY_PATH, 0o755)
-    
-    # Create service template
-    edns_service = f"""[Unit]
-Description=EDNS Proxy Worker %i
-After=network.target
-PartOf=edns-proxy.target
-Wants=edns-proxy.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/bin/python3 {EDNS_PROXY_PATH}
-Restart=always
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=edns-proxy-%i
-LimitNOFILE=1048576
-CPUQuota={min(100//WORKERS, 50)}%
-MemoryMax=512M
-
-[Install]
-WantedBy=edns-proxy.target
-"""
-    
-    with open("/etc/systemd/system/edns-proxy@.service", "w") as f:
-        f.write(edns_service)
-    
-    # Create target service
-    target_service = """[Unit]
-Description=EDNS Proxy Target
-AllowIsolate=yes
-
-[Install]
-WantedBy=multi-user.target
-"""
-    
-    with open("/etc/systemd/system/edns-proxy.target", "w") as f:
-        f.write(target_service)
-    
-    print(f"  ✓ EDNS Proxy with {WORKERS} workers")
-    
-    # ========== STEP 7: FIREWALL ==========
-    print("\n[7] Configuring firewall...")
+    # ========== STEP 9: FIREWALL CONFIGURATION ==========
+    print("\n[9] Configuring firewall...")
     
     # Clear existing rules
-    run("iptables -F 2>/dev/null || true", verbose=False)
-    run("iptables -t nat -F 2>/dev/null || true", verbose=False)
-    run("iptables -X 2>/dev/null || true", verbose=False)
+    run_cmd("iptables -F 2>/dev/null", check=False)
+    run_cmd("iptables -t nat -F 2>/dev/null", check=False)
     
-    # Default policies
-    run("iptables -P INPUT DROP", verbose=False)
-    run("iptables -P FORWARD DROP", verbose=False)
-    run("iptables -P OUTPUT ACCEPT", verbose=False)
+    # Allow SSH
+    run_cmd(f"iptables -A INPUT -p tcp --dport {SSHD_PORT} -j ACCEPT", check=False)
     
-    # Allow loopback
-    run("iptables -A INPUT -i lo -j ACCEPT", verbose=False)
+    # Allow SlowDNS
+    run_cmd(f"iptables -A INPUT -p udp --dport {SLOWDNS_PORT} -j ACCEPT", check=False)
     
     # Allow established connections
-    run("iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT", verbose=False)
+    run_cmd("iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT", check=False)
     
-    # Allow ICMP (ping)
-    run("iptables -A INPUT -p icmp -j ACCEPT", verbose=False)
+    # Allow loopback
+    run_cmd("iptables -A INPUT -i lo -j ACCEPT", check=False)
     
-    # Allow our ports
-    ports = [
-        (SSHD_PORT, "tcp", "SSH"),
-        (SLOWDNS_PORT, "udp", "SlowDNS"),
-        (EDNS_LISTEN_PORT, "udp", "DNS Proxy"),
-    ]
-    
-    for port, proto, name in ports:
-        run(f"iptables -A INPUT -p {proto} --dport {port} -j ACCEPT", verbose=False)
-        print(f"  ✓ Allowed {name} on {proto.upper()}:{port}")
+    # Drop everything else
+    run_cmd("iptables -P INPUT DROP", check=False)
     
     # Save rules
-    run("iptables-save > /etc/iptables/rules.v4 2>/dev/null || true", verbose=False)
-    run("ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true", verbose=False)
+    run_cmd("iptables-save > /etc/iptables/rules.v4 2>/dev/null", check=False)
+    run_cmd("systemctl enable netfilter-persistent 2>/dev/null", check=False)
     
-    # Enable persistence
-    run("systemctl enable netfilter-persistent 2>/dev/null || true", verbose=False)
+    print_success("Firewall configured")
     
-    # ========== STEP 8: ENABLE SERVICES ==========
-    print("\n[8] Enabling services...")
+    # ========== STEP 10: VERIFICATION ==========
+    print("\n[10] Verifying installation...")
     
-    # Reload systemd
-    run("systemctl daemon-reload", verbose=True)
-    
-    # Enable and start slowdns
-    run("systemctl enable slowdns-server.service", verbose=False)
-    run("systemctl start slowdns-server.service", verbose=True)
-    
-    # Enable target
-    run("systemctl enable edns-proxy.target", verbose=False)
-    run("systemctl start edns-proxy.target", verbose=True)
-    
-    # Start workers
-    print(f"  Starting {WORKERS} EDNS workers...")
-    for i in range(1, WORKERS + 1):
-        run(f"systemctl enable edns-proxy@{i}.service", verbose=False)
-        run(f"systemctl start edns-proxy@{i}.service", verbose=False)
-        print(f"    Worker {i}/{WORKERS}", end='\r')
-    print()
-    
-    # ========== STEP 9: VERIFICATION ==========
-    print("\n[9] Verification...")
-    
-    # Check services
-    services = ["slowdns-server"] + [f"edns-proxy@{i}" for i in range(1, WORKERS + 1)]
-    
-    print("  Service Status:")
-    for svc in services:
-        result = run(f"systemctl is-active {svc}", capture=True)
-        if result.returncode == 0:
-            print(f"    ✓ {svc:25} ACTIVE")
+    print("\nChecking services:")
+    services = ["sshd", "slowdns-server"]
+    for service in services:
+        if service_is_active(service):
+            print_success(f"{service} is running")
         else:
-            print(f"    ✗ {svc:25} INACTIVE")
-            print(f"       Debug: systemctl status {svc}")
+            print_error(f"{service} is NOT running")
     
-    # Check listening ports
-    print("\n  Listening Ports:")
-    for port, proto, name in ports:
-        result = run(f"ss -lnp{proto[0]} | grep -q ':{port}'", capture=True)
+    print("\nChecking ports:")
+    ports = [(SSHD_PORT, "tcp"), (SLOWDNS_PORT, "udp")]
+    for port, proto in ports:
+        result = run_cmd(f"ss -lnp{proto[0]} | grep -q ':{port}'", check=False)
         if result.returncode == 0:
-            print(f"    ✓ {name:15} {proto.upper():4}:{port:5} ✓")
+            print_success(f"Port {port}/{proto} is listening")
         else:
-            print(f"    ✗ {name:15} {proto.upper():4}:{port:5} ✗")
+            print_error(f"Port {port}/{proto} is NOT listening")
     
     # Show public key
     pubkey_path = f"{SLOWDNS_DIR}/server.pub"
     if os.path.exists(pubkey_path):
-        print(f"\n{'='*60}")
+        print("\n" + "="*60)
         print("PUBLIC KEY (Copy for clients):")
         print("="*60)
         with open(pubkey_path, "r") as f:
-            key = f.read().strip()
-            if key and "dummy" not in key:
-                print(key)
-            else:
-                print("WARNING: Using dummy key. Replace with real key for production!")
+            print(f.read().strip())
         print("="*60)
     
-    # Show summary
-    print(f"\n{'='*60}")
+    # Final summary
+    print("\n" + "="*60)
     print("INSTALLATION COMPLETE")
     print("="*60)
-    print(f"Domain:        {DNS_HOSTNAME}")
+    print(f"Nameserver:    {nameserver}")
     print(f"SSH Port:      {SSHD_PORT}")
     print(f"SlowDNS Port:  {SLOWDNS_PORT}")
-    print(f"DNS Proxy:     {EDNS_LISTEN_PORT} (EDNS)")
-    print(f"Workers:       {WORKERS}")
-    print(f"MTU External:  {EDNS_EXTERNAL}")
-    print(f"MTU Internal:  {EDNS_INTERNAL}")
-    print("="*60)
+    print(f"Public Key:    Saved in {pubkey_path}")
     print("\nNext steps:")
-    print("1. Point your domain's NS record to this server")
-    print("2. Test with: dig @$(curl -s ifconfig.me) test. YOUR_DOMAIN TXT")
+    print(f"1. Point NS record of {nameserver} to your server IP")
+    print("2. Test with: dig @$(curl -s ifconfig.me) test.${nameserver} TXT")
     print("3. Check logs: journalctl -u slowdns-server -f")
     print("="*60)
 
