@@ -2,18 +2,16 @@
 """
 ULTRA SlowDNS + EDNS Installer (Fully Integrated)
 - SlowDNS (DNSTT)
-- Async multi-core EDNS proxy (port 53)
+- Async EDNS proxy (port 53 -> SlowDNS 5300)
 - Rate limit / anti-abuse
-- SO_REUSEPORT + zero-copy recvmsg
 - rc.local + iptables flush
 - Hard IPv6 disable
 - Proper systemd services
 - Interactive port 53 conflict check
 """
 
-import os, sys, socket, struct, selectors, time, subprocess, multiprocessing
+import os, sys, socket, struct, selectors, time, subprocess, urllib.request
 from pathlib import Path
-import urllib.request
 
 # ================= CONFIG =================
 SSHD_PORT = 22
@@ -54,11 +52,9 @@ def stop_conflicts():
             print("Aborted by user. Free port 53 first.")
             sys.exit(1)
         print("[*] Stopping conflicting services...")
-        # Stop systemd-resolved if active
         if os.system("systemctl is-active --quiet systemd-resolved") == 0:
             run("systemctl stop systemd-resolved")
             run("systemctl disable systemd-resolved")
-        # Kill any process using port 53
         os.system("fuser -k 53/udp || true")
         os.system("fuser -k 53/tcp || true")
     else:
@@ -68,7 +64,6 @@ def stop_conflicts():
 def setup_rc_local():
     rc = f"""#!/bin/sh -e
 systemctl start sshd
-
 iptables -F
 iptables -X
 iptables -t nat -F
@@ -76,28 +71,22 @@ iptables -t nat -X
 iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 iptables -P OUTPUT ACCEPT
-
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-
 iptables -A INPUT -p tcp --dport {SSHD_PORT} -j ACCEPT
 iptables -A INPUT -p udp --dport {SLOWDNS_PORT} -j ACCEPT
 iptables -A INPUT -p tcp --dport {SLOWDNS_PORT} -j ACCEPT
 iptables -A INPUT -p udp --dport {DNS_PORT} -j ACCEPT
 iptables -A INPUT -p tcp --dport {DNS_PORT} -j ACCEPT
-
 iptables -A INPUT -p icmp -j ACCEPT
 iptables -A OUTPUT -j ACCEPT
-
 iptables -A INPUT -m state --state INVALID -j DROP
 iptables -A INPUT -p tcp --dport {SSHD_PORT} -m recent --set
 iptables -A INPUT -p tcp --dport {SSHD_PORT} -m recent --update --seconds 60 --hitcount 4 -j DROP
-
 echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 sysctl -w net.core.rmem_max=134217728
 sysctl -w net.core.wmem_max=134217728
-
 exit 0
 """
     Path("/etc/rc.local").write_text(rc)
@@ -105,15 +94,16 @@ exit 0
     run("systemctl enable rc-local || true")
     run("systemctl start rc-local || true")
 
-# ================= SSH =================
+# ================= SSH CONFIG =================
 def ssh_config():
-    Path("/etc/ssh/sshd_config").write_text(f"""Port {SSHD_PORT}
+    ssh_conf = f"""Port {SSHD_PORT}
 PermitRootLogin yes
 PasswordAuthentication yes
 AllowTcpForwarding yes
 GatewayPorts yes
 UseDNS no
-""")
+"""
+    Path("/etc/ssh/sshd_config").write_text(ssh_conf)
     run("systemctl restart sshd")
 
 # ================= SLOWDNS =================
@@ -122,8 +112,7 @@ def slowdns_install(ns):
     for name, url in FILES.items():
         dst = BASE_DIR / name
         if dst.exists():
-            try: os.remove(dst)
-            except: pass
+            dst.unlink()
         urllib.request.urlretrieve(url, dst)
         if "dnstt" in name:
             dst.chmod(0o755)
@@ -146,16 +135,17 @@ WantedBy=multi-user.target
     run("systemctl enable slowdns")
     run("systemctl start slowdns")
 
-# ================= EDNS =================
+# ================= EDNS PATCH =================
 def patch_edns(data, size):
     if len(data) < 12: return data
     buf = bytearray(data)
     for i in range(len(buf)-2):
-        if buf[i:i+2] == b"\x00\x29":
+        if buf[i:i+2] == b"\x00\x29":  # OPT RR
             buf[i+3:i+5] = struct.pack("!H", size)
             break
     return bytes(buf)
 
+# ================= EDNS WORKER =================
 def edns_worker():
     sel = selectors.DefaultSelector()
     rate = {}
@@ -181,16 +171,22 @@ def edns_worker():
                 tokens, ts = rate.get(ip, (RATE_BURST, now))
                 tokens += (now - ts) * RATE_QPS
                 if tokens > RATE_BURST: tokens = RATE_BURST
-                if tokens < 1: rate[ip] = (tokens, now); continue
+                if tokens < 1:
+                    rate[ip] = (tokens, now)
+                    continue
                 rate[ip] = (tokens - 1, now)
                 upstream.sendto(patch_edns(data, INT_EDNS), ("127.0.0.1", SLOWDNS_PORT))
                 pending[ip] = addr
             else:
-                data, _ = upstream.recvfrom(4096)
-                if pending:
-                    ip, addr = pending.popitem()
-                    sock.sendto(patch_edns(data, EXT_EDNS), addr)
+                try:
+                    data, _ = upstream.recvfrom(4096)
+                    if pending:
+                        ip, addr = pending.popitem()
+                        sock.sendto(patch_edns(data, EXT_EDNS), addr)
+                except:
+                    continue
 
+# ================= EDNS SERVICE =================
 def edns_service_file():
     service = f"""[Unit]
 Description=EDNS Proxy (UDP 53 -> SlowDNS {SLOWDNS_PORT})
@@ -199,7 +195,7 @@ Requires=slowdns.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /etc/slowdns/edns.py
+ExecStart=/usr/bin/python3 /etc/slowdns/edns.py --worker
 Restart=always
 User=root
 LimitNOFILE=65536
@@ -214,9 +210,10 @@ WantedBy=multi-user.target
     run("systemctl enable edns")
     run("systemctl start edns")
 
+# ================= SAVE SCRIPT AS EDNS.PY =================
 def edns_install_file():
     edns_path = BASE_DIR / "edns.py"
-    code = open(__file__).read()  # save this script as edns.py
+    code = open(__file__).read()
     edns_path.write_text(code)
     edns_path.chmod(0o755)
 
@@ -224,8 +221,7 @@ def edns_install_file():
 def main():
     root()
     stop_conflicts()
-    ns = input("Enter nameserver (dns.example.com): ").strip()
-
+    ns = input("Enter nameserver (default 8.8.8.8): ").strip() or "8.8.8.8"
     ssh_config()
     setup_rc_local()
     slowdns_install(ns)
@@ -237,5 +233,9 @@ def main():
     print("Check status: systemctl status slowdns edns")
     print("Test DNS: dig @127.0.0.1 google.com +short")
 
+# ================= ENTRY =================
 if __name__ == "__main__":
-    main()
+    if "--worker" in sys.argv:
+        edns_worker()
+    else:
+        main()
