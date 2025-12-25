@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDNS Proxy for SlowDNS - Fixed Version
+EDNS Proxy for SlowDNS - Complete DNS Integration
 """
 
 import socket
@@ -9,361 +9,379 @@ import threading
 import time
 import sys
 import os
-import subprocess
+import select
+from typing import Optional, Tuple
 
-# Colors for output
-RED = '\033[0;31m'
-GREEN = '\033[0;32m'
-YELLOW = '\033[1;33m'
-BLUE = '\033[0;34m'
-NC = '\033[0m'
-
-# Configuration
-EXTERNAL_EDNS_SIZE = 512
-INTERNAL_EDNS_SIZE = 1232
+# ========================= CONFIGURATION =========================
+EXTERNAL_EDNS_SIZE = 512      # What clients see (standard DNS)
+INTERNAL_EDNS_SIZE = 1232     # What SlowDNS sees (bypass MTU)
+LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 53
+UPSTREAM_HOST = "127.0.0.1"
 UPSTREAM_PORT = 5300
 
-def print_msg(msg):
-    print(f"{BLUE}[*]{NC} {msg}")
+# Fallback DNS servers if SlowDNS fails
+FALLBACK_DNS_SERVERS = [
+    ("8.8.8.8", 53),      # Google DNS
+    ("1.1.1.1", 53),      # Cloudflare DNS
+    ("8.8.4.4", 53)       # Google DNS secondary
+]
 
-def print_success(msg):
-    print(f"{GREEN}[✓]{NC} {msg}")
+# ========================= DNS PARSING ==========================
 
-def print_error(msg):
-    print(f"{RED}[✗]{NC} {msg}")
-
-def print_warning(msg):
-    print(f"{YELLOW}[!]{NC} {msg}")
-
-def check_root():
-    if os.geteuid() != 0:
-        print_error("Please run as root: sudo python3 script.py")
-        sys.exit(1)
-
-def check_slowdns():
-    print_msg(f"Checking if SlowDNS is running on port {UPSTREAM_PORT}...")
+class DNSParser:
+    """DNS packet parser and manipulator."""
     
-    # Simple check without subprocess errors
-    try:
-        # Try to connect to the port
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(1)
-        sock.sendto(b"test", ("127.0.0.1", UPSTREAM_PORT))
-        sock.close()
-        print_success(f"SlowDNS found running on port {UPSTREAM_PORT}")
-        return True
-    except:
-        print_warning(f"SlowDNS not found on port {UPSTREAM_PORT}")
-        print(f"\n{YELLOW}Note: This EDNS Proxy requires SlowDNS to be running first.{NC}")
-        print(f"{YELLOW}Please install and start SlowDNS before running this script.{NC}\n")
-        return False
+    @staticmethod
+    def parse_header(data: bytes) -> Optional[Tuple]:
+        """Parse DNS header."""
+        if len(data) < 12:
+            return None
+        
+        try:
+            header = struct.unpack("!HHHHHH", data[:12])
+            return {
+                'id': header[0],
+                'flags': header[1],
+                'qdcount': header[2],
+                'ancount': header[3],
+                'nscount': header[4],
+                'arcount': header[5]
+            }
+        except:
+            return None
+    
+    @staticmethod
+    def skip_name(data: bytes, offset: int) -> int:
+        """Skip DNS name with compression."""
+        orig_offset = offset
+        max_offset = len(data) - 1
+        
+        while offset <= max_offset:
+            length = data[offset]
+            offset += 1
+            
+            if length == 0:
+                break
+            elif length & 0xC0 == 0xC0:  # Compression pointer
+                if offset <= max_offset:
+                    offset += 1
+                break
+            else:
+                offset += min(length, max_offset - offset + 1)
+        
+        return offset
+    
+    @staticmethod
+    def patch_edns_size(data: bytes, new_size: int) -> bytes:
+        """Patch EDNS UDP payload size in DNS packet."""
+        if len(data) < 12:
+            return data
+        
+        try:
+            # Parse header
+            qdcount, ancount, nscount, arcount = struct.unpack("!HHHH", data[4:12])
+        except struct.error:
+            return data
+        
+        offset = 12
+        
+        # Skip questions
+        for _ in range(qdcount):
+            offset = DNSParser.skip_name(data, offset)
+            if offset + 4 > len(data):
+                return data
+            offset += 4  # QTYPE + QCLASS
+        
+        # Skip answers and authority
+        def skip_rrs(count: int) -> bool:
+            nonlocal offset
+            for _ in range(count):
+                offset = DNSParser.skip_name(data, offset)
+                if offset + 10 > len(data):
+                    return False
+                rdlen = struct.unpack("!H", data[offset+8:offset+10])[0]
+                offset += 10 + rdlen
+            return True
+        
+        if not skip_rrs(ancount) or not skip_rrs(nscount):
+            return data
+        
+        # Find and patch EDNS OPT record
+        new_data = bytearray(data)
+        for _ in range(arcount):
+            offset = DNSParser.skip_name(data, offset)
+            if offset + 4 > len(data):
+                return bytes(new_data)
+            
+            rtype = struct.unpack("!H", new_data[offset:offset+2])[0]
+            if rtype == 41:  # OPT RR
+                # Patch UDP payload size
+                new_data[offset+2:offset+4] = struct.pack("!H", new_size)
+                return bytes(new_data)
+            
+            if offset + 10 > len(data):
+                return bytes(new_data)
+            rdlen = struct.unpack("!H", new_data[offset+8:offset+10])[0]
+            offset += 10 + rdlen
+        
+        return bytes(new_data)
+    
+    @staticmethod
+    def is_valid_dns_packet(data: bytes) -> bool:
+        """Check if data looks like a valid DNS packet."""
+        if len(data) < 12:
+            return False
+        
+        try:
+            # Check DNS header
+            flags = struct.unpack("!H", data[2:4])[0]
+            # Basic validation: QR bit should be 0 for query, 1 for response
+            qr = (flags >> 15) & 0x1
+            opcode = (flags >> 11) & 0xF
+            
+            # Valid DNS opcodes: 0=Query, 1=IQuery, 2=Status, 4=Notify, 5=Update
+            valid_opcodes = {0, 1, 2, 4, 5}
+            return opcode in valid_opcodes
+        except:
+            return False
 
-def safe_stop_dns():
-    print_msg("Stopping existing DNS services on port 53...")
+# ========================= DNS HANDLER ==========================
+
+class DNSHandler:
+    """Handle DNS queries with fallback support."""
     
-    # Stop systemd-resolved if running
-    try:
-        result = subprocess.run(['systemctl', 'is-active', 'systemd-resolved'], 
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if result.returncode == 0:
-            print_msg("Stopping systemd-resolved...")
-            subprocess.run(['systemctl', 'stop', 'systemd-resolved'])
-            time.sleep(1)
-    except:
-        pass
+    def __init__(self):
+        self.stats = {
+            'requests': 0,
+            'slowdns_success': 0,
+            'fallback_success': 0,
+            'timeouts': 0,
+            'errors': 0
+        }
     
-    # Disable systemd-resolved - FIXED: no capture_output
-    try:
-        subprocess.run(['systemctl', 'disable', 'systemd-resolved'])
-    except:
-        pass
+    def forward_to_upstream(self, data: bytes, host: str, port: int, timeout: float = 3.0) -> Optional[bytes]:
+        """Forward DNS query to upstream server."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            
+            # Patch EDNS size based on destination
+            if port == UPSTREAM_PORT:
+                # To SlowDNS: use larger EDNS
+                query = DNSParser.patch_edns_size(data, INTERNAL_EDNS_SIZE)
+            else:
+                # To regular DNS: keep standard EDNS
+                query = data
+            
+            sock.sendto(query, (host, port))
+            
+            # Wait for response with select for better timeout handling
+            ready = select.select([sock], [], [], timeout)
+            if ready[0]:
+                response, _ = sock.recvfrom(4096)
+                
+                # Patch response EDNS size if coming from SlowDNS
+                if port == UPSTREAM_PORT:
+                    response = DNSParser.patch_edns_size(response, EXTERNAL_EDNS_SIZE)
+                
+                return response
+            else:
+                return None
+                
+        except socket.timeout:
+            return None
+        except ConnectionRefusedError:
+            return None
+        except Exception as e:
+            return None
+        finally:
+            try:
+                sock.close()
+            except:
+                pass
     
-    # Check what's on port 53
-    print_msg("Checking what's using port 53...")
-    
-    try:
-        result = subprocess.run(['ss', '-tulpn'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        port_users = []
-        for line in result.stdout.decode().split('\n'):
-            if ':53 ' in line:
-                port_users.append(line.strip())
-                if len(port_users) >= 5:
+    def handle_query(self, server_sock: socket.socket, data: bytes, client_addr: Tuple[str, int]) -> None:
+        """Handle a DNS query with SlowDNS primary + fallback."""
+        self.stats['requests'] += 1
+        
+        # Validate DNS packet
+        if not DNSParser.is_valid_dns_packet(data):
+            return
+        
+        response = None
+        
+        # Try SlowDNS first
+        response = self.forward_to_upstream(data, UPSTREAM_HOST, UPSTREAM_PORT, 2.0)
+        
+        if response and len(response) >= 12:
+            self.stats['slowdns_success'] += 1
+        else:
+            # SlowDNS failed, try fallback DNS servers
+            for dns_server, dns_port in FALLBACK_DNS_SERVERS:
+                response = self.forward_to_upstream(data, dns_server, dns_port, 1.0)
+                if response and len(response) >= 12:
+                    self.stats['fallback_success'] += 1
                     break
         
-        if port_users:
-            print_warning("Port 53 is currently in use by:")
-            for line in port_users:
-                print(f"  {line}")
-            
-            # Ask user for confirmation
-            print("")
-            reply = input("Continue and stop these services? (y/n): ").strip().lower()
-            if reply not in ['y', 'yes']:
-                print_error("Installation aborted by user")
-                sys.exit(1)
-            
-            # Stop services
-            print_msg("Stopping services...")
-            
-            # Stop common DNS services
-            services = ['dnsmasq', 'bind9', 'named']
-            for service in services:
-                try:
-                    subprocess.run(['systemctl', 'stop', service])
-                except:
-                    pass
-            
-            time.sleep(2)
-            
-            # If still in use, use fuser
-            result = subprocess.run(['ss', '-tulpn'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if ':53 ' in result.stdout.decode():
-                print_msg("Freeing port 53 using fuser...")
-                subprocess.run(['fuser', '-k', '53/udp'])
-                subprocess.run(['fuser', '-k', '53/tcp'])
-                time.sleep(2)
-    
-    except Exception as e:
-        print_error(f"Error checking port 53: {e}")
-    
-    print_success("Port 53 prepared for EDNS Proxy")
-
-def configure_dns():
-    print_msg("Configuring DNS...")
-    
-    try:
-        # Remove symlink if exists
-        if os.path.islink('/etc/resolv.conf'):
-            os.remove('/etc/resolv.conf')
-        
-        # Write new DNS config
-        with open('/etc/resolv.conf', 'w') as f:
-            f.write("nameserver 8.8.8.8\n")
-            f.write("nameserver 8.8.4.4\n")
-        
-        print_success("DNS configured")
-        return True
-    except Exception as e:
-        print_error(f"Failed to configure DNS: {e}")
-        return False
-
-def disable_services():
-    print_msg("Disabling services...")
-    
-    # Disable UFW
-    try:
-        subprocess.run(['ufw', 'disable'])
-        subprocess.run(['systemctl', 'stop', 'ufw'])
-        subprocess.run(['systemctl', 'disable', 'ufw'])
-        print_success("UFW disabled")
-    except:
-        pass
-    
-    # Disable IPv6
-    try:
-        with open('/proc/sys/net/ipv6/conf/all/disable_ipv6', 'w') as f:
-            f.write('1\n')
-        print_success("IPv6 disabled")
-    except:
-        pass
-
-def create_edns_proxy():
-    print_msg("Creating EDNS Proxy script...")
-    
-    script = '''#!/usr/bin/env python3
-import socket, threading, struct
-
-EXTERNAL = 512
-INTERNAL = 1232
-
-def patch_edns(data, new_size):
-    if len(data) < 12:
-        return data
-    try:
-        qdcount, ancount, nscount, arcount = struct.unpack("!HHHH", data[4:12])
-    except:
-        return data
-    
-    offset = 12
-    
-    # Skip questions
-    for _ in range(qdcount):
-        while offset < len(data) and data[offset] != 0:
-            offset += 1
-        offset += 5
-    
-    # Skip answers and authority
-    for _ in range(ancount + nscount):
-        while offset < len(data) and data[offset] != 0:
-            offset += 1
-        if offset + 11 >= len(data):
-            return data
-        rdlen = struct.unpack("!H", data[offset+9:offset+11])[0]
-        offset += 11 + rdlen
-    
-    # Find and patch EDNS
-    for _ in range(arcount):
-        while offset < len(data) and data[offset] != 0:
-            offset += 1
-        if offset + 11 >= len(data):
-            return data
-        
-        rtype = struct.unpack("!H", data[offset+1:offset+3])[0]
-        if rtype == 41:
-            new_data = bytearray(data)
-            new_data[offset+3:offset+5] = struct.pack("!H", new_size)
-            return bytes(new_data)
-        
-        rdlen = struct.unpack("!H", data[offset+9:offset+11])[0]
-        offset += 11 + rdlen
-    
-    return data
-
-def handle(sock, data, addr):
-    upstream = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    upstream.settimeout(3)
-    
-    try:
-        # To SlowDNS with bigger EDNS
-        query = patch_edns(data, INTERNAL)
-        upstream.sendto(query, ("127.0.0.1", 5300))
-        
-        # From SlowDNS
-        response, _ = upstream.recvfrom(4096)
-        response = patch_edns(response, EXTERNAL)
-        sock.sendto(response, addr)
-    except:
-        pass
-    finally:
-        upstream.close()
-
-def main():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", 53))
-    
-    print("[EDNS Proxy] Listening on port 53")
-    print("[EDNS Proxy] Forwarding to 127.0.0.1:5300")
-    print("[EDNS Proxy] EDNS: 512 -> 1232")
-    
-    try:
-        while True:
-            data, addr = sock.recvfrom(4096)
-            threading.Thread(target=handle, args=(sock, data, addr), daemon=True).start()
-    except KeyboardInterrupt:
-        print("\n[EDNS Proxy] Stopping")
-    finally:
-        sock.close()
-
-if __name__ == "__main__":
-    main()
-'''
-    
-    try:
-        with open('/usr/local/bin/edns-proxy.py', 'w') as f:
-            f.write(script)
-        os.chmod('/usr/local/bin/edns-proxy.py', 0o755)
-        print_success("EDNS Proxy script created")
-        return True
-    except Exception as e:
-        print_error(f"Failed to create script: {e}")
-        return False
-
-def create_systemd_service():
-    print_msg("Creating systemd service...")
-    
-    service = '''[Unit]
-Description=EDNS Proxy for SlowDNS
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /usr/local/bin/edns-proxy.py
-Restart=always
-RestartSec=3
-User=root
-
-[Install]
-WantedBy=multi-user.target
-'''
-    
-    try:
-        with open('/etc/systemd/system/edns-proxy.service', 'w') as f:
-            f.write(service)
-        
-        subprocess.run(['systemctl', 'daemon-reload'])
-        subprocess.run(['systemctl', 'enable', 'edns-proxy.service'])
-        
-        print_success("Systemd service created")
-        return True
-    except Exception as e:
-        print_error(f"Failed to create service: {e}")
-        return False
-
-def start_service():
-    print_msg("Starting EDNS Proxy service...")
-    
-    try:
-        subprocess.run(['systemctl', 'start', 'edns-proxy.service'])
-        time.sleep(2)
-        
-        # Check status
-        result = subprocess.run(['systemctl', 'is-active', 'edns-proxy.service'], 
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if result.returncode == 0:
-            print_success("EDNS Proxy service started")
+        # Send response back to client
+        if response and len(response) >= 12:
+            try:
+                server_sock.sendto(response, client_addr)
+            except:
+                self.stats['errors'] += 1
         else:
-            print_warning("Service might not be running")
-    except Exception as e:
-        print_error(f"Failed to start service: {e}")
+            self.stats['timeouts'] += 1
+    
+    def print_stats(self, interval: int = 100):
+        """Print statistics every N requests."""
+        if self.stats['requests'] % interval == 0:
+            total = self.stats['requests']
+            slowdns_rate = (self.stats['slowdns_success'] / max(total, 1)) * 100
+            fallback_rate = (self.stats['fallback_success'] / max(total, 1)) * 100
+            
+            print(f"\n[STATS] Requests: {total}")
+            print(f"        SlowDNS: {self.stats['slowdns_success']} ({slowdns_rate:.1f}%)")
+            print(f"        Fallback: {self.stats['fallback_success']} ({fallback_rate:.1f}%)")
+            print(f"        Timeouts: {self.stats['timeouts']}")
+            print(f"        Errors: {self.stats['errors']}")
+
+# ========================= MAIN PROXY ==========================
+
+class EDNSProxy:
+    """Main EDNS Proxy server."""
+    
+    def __init__(self):
+        self.handler = DNSHandler()
+        self.running = False
+        self.server_sock = None
+    
+    def setup_socket(self) -> bool:
+        """Setup UDP socket for DNS."""
+        try:
+            # Check if we're root (needed for port 53)
+            if os.geteuid() != 0:
+                print("ERROR: Must run as root (use sudo)")
+                return False
+            
+            # Create socket
+            self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            # Set socket options
+            self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
+            
+            # Bind to port
+            self.server_sock.bind((LISTEN_HOST, LISTEN_PORT))
+            
+            return True
+            
+        except OSError as e:
+            if "Address already in use" in str(e):
+                print("ERROR: Port 53 is already in use")
+                print("Try these commands:")
+                print("  sudo fuser -k 53/udp")
+                print("  sudo fuser -k 53/tcp")
+                print("  sudo systemctl stop systemd-resolved")
+            else:
+                print(f"ERROR: Cannot bind to port {LISTEN_PORT}: {e}")
+            return False
+    
+    def check_slowdns(self) -> bool:
+        """Check if SlowDNS is reachable."""
+        print("[*] Checking SlowDNS connectivity...")
+        
+        # Create a simple DNS query
+        query = b"\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"  # Header
+        query += b"\x06google\x03com\x00"  # Query: google.com
+        query += b"\x00\x01\x00\x01"  # QTYPE=A, QCLASS=IN
+        
+        response = self.handler.forward_to_upstream(query, UPSTREAM_HOST, UPSTREAM_PORT, 2.0)
+        
+        if response:
+            print("[✓] SlowDNS is responding")
+            return True
+        else:
+            print("[!] SlowDNS not responding (will use fallback DNS)")
+            return False
+    
+    def run(self):
+        """Run the EDNS Proxy."""
+        print("="*60)
+        print("          EDNS PROXY FOR SLOWDNS")
+        print("="*60)
+        print(f"Listen:    {LISTEN_HOST}:{LISTEN_PORT}")
+        print(f"Upstream:  {UPSTREAM_HOST}:{UPSTREAM_PORT}")
+        print(f"EDNS:      {EXTERNAL_EDNS_SIZE} ↔ {INTERNAL_EDNS_SIZE}")
+        print("="*60)
+        print("[*] Starting EDNS Proxy...")
+        
+        # Setup socket
+        if not self.setup_socket():
+            return
+        
+        # Check SlowDNS
+        self.check_slowdns()
+        
+        print("\n[*] Proxy is running. Press Ctrl+C to stop.")
+        print("[*] Statistics will show every 100 requests.\n")
+        
+        self.running = True
+        last_stats_time = time.time()
+        
+        try:
+            while self.running:
+                try:
+                    # Set timeout to allow keyboard interrupt
+                    self.server_sock.settimeout(1.0)
+                    
+                    # Wait for data
+                    ready = select.select([self.server_sock], [], [], 1.0)
+                    if ready[0]:
+                        data, addr = self.server_sock.recvfrom(4096)
+                        
+                        # Handle in thread pool
+                        thread = threading.Thread(
+                            target=self.handler.handle_query,
+                            args=(self.server_sock, data, addr),
+                            daemon=True
+                        )
+                        thread.start()
+                    
+                    # Print stats periodically
+                    current_time = time.time()
+                    if current_time - last_stats_time >= 30:  # Every 30 seconds
+                        if self.handler.stats['requests'] > 0:
+                            self.handler.print_stats(1)  # Force print
+                        last_stats_time = current_time
+                    
+                except socket.timeout:
+                    continue
+                except KeyboardInterrupt:
+                    print("\n[*] Stopping proxy...")
+                    self.running = False
+                except Exception as e:
+                    print(f"[ERROR] {e}")
+                    
+        finally:
+            # Cleanup
+            if self.server_sock:
+                self.server_sock.close()
+            
+            # Final statistics
+            print("\n" + "="*60)
+            print("FINAL STATISTICS:")
+            print("="*60)
+            self.handler.print_stats(1)
+            print("="*60)
+            print("[✓] EDNS Proxy stopped")
+
+# ========================= ENTRY POINT ==========================
 
 def main():
-    print("\n" + "="*60)
-    print("            EDNS Proxy for SlowDNS Installation")
-    print("="*60 + "\n")
-    
-    # Check root
-    check_root()
-    
-    print_msg("Starting installation...")
-    
-    # Check SlowDNS
-    slowdns_running = check_slowdns()
-    if not slowdns_running:
-        print_warning("SlowDNS not found. Continuing setup anyway...")
-    
-    # Configure system
-    configure_dns()
-    disable_services()
-    
-    # Stop DNS services
-    safe_stop_dns()
-    
-    # Create proxy
-    if not create_edns_proxy():
-        sys.exit(1)
-    
-    # Create service
-    create_systemd_service()
-    
-    # Start service
-    start_service()
-    
-    # Final message
-    print(f"\n{GREEN}="*60)
-    print_success("INSTALLATION COMPLETE!")
-    print(f"{GREEN}="*60)
-    
-    print(f"\n{YELLOW}Commands:{NC}")
-    print("  sudo systemctl status edns-proxy")
-    print("  sudo systemctl restart edns-proxy")
-    print("  dig @127.0.0.1 google.com")
-    
-    if not slowdns_running:
-        print(f"\n{YELLOW}Warning:{NC} SlowDNS is not running!")
-        print("Start SlowDNS first for EDNS Proxy to work.")
-    
-    print()
+    """Main entry point."""
+    proxy = EDNSProxy()
+    proxy.run()
 
 if __name__ == "__main__":
     main()
