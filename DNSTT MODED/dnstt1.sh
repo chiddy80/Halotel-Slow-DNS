@@ -16,8 +16,9 @@ NC='\033[0m'
 SSHD_PORT=22
 SLOWDNS_PORT=5300
 
-# Predefined nameserver (change if needed)
-NAMESERVER="dns.example.com"
+# Prompt user for nameserver
+read -p "Enter nameserver (default: dns.example.com): " NAMESERVER
+NAMESERVER=${NAMESERVER:-dns.example.com}
 
 # Functions
 print_success() {
