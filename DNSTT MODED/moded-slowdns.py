@@ -1,400 +1,450 @@
+#!/bin/bash
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m'
+
+# Configuration
+EXTERNAL_EDNS_SIZE=512
+INTERNAL_EDNS_SIZE=1232
+EDNS_PROXY_PORT=53
+SLOWDNS_PORT=5300
+
+# Title Function
+print_title() {
+    clear
+    echo ""
+    echo -e "${CYAN}────────────────────────────────────────────────────────────────${NC}"
+    echo -e "${WHITE}   E D N S   P R O X Y   I N S T A L L A T I O N${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────────────────────────${NC}"
+    echo -e "${YELLOW}   Bypass MTU 512 for SlowDNS (512 → $INTERNAL_EDNS_SIZE)${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+}
+
+print() {
+    echo -e "${GREEN}[^]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[✓]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[✗]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[!]${NC} $1"
+}
+
+# Check root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then 
+        echo -e "${RED}Please run as root: sudo bash $0${NC}"
+        exit 1
+    fi
+}
+
+# Check if SlowDNS is running
+check_slowdns() {
+    print "Checking if SlowDNS is running on port $SLOWDNS_PORT..."
+    if ss -ulpn | grep -q ":$SLOWDNS_PORT"; then
+        print_success "SlowDNS found running on port $SLOWDNS_PORT"
+        return 0
+    else
+        print_error "SlowDNS not found on port $SLOWDNS_PORT"
+        echo ""
+        echo -e "${YELLOW}Note: This EDNS Proxy requires SlowDNS to be running first.${NC}"
+        echo -e "${YELLOW}Please install and start SlowDNS before running this script.${NC}"
+        echo ""
+        exit 1
+    fi
+}
+
+# SAFE: Stop DNS services without killing the script
+safe_stop_dns() {
+    print "Stopping existing DNS services on port 53..."
+    
+    # 1. Stop systemd-resolved if running
+    if systemctl is-active --quiet systemd-resolved; then
+        print "Stopping systemd-resolved..."
+        systemctl stop systemd-resolved
+        sleep 1
+    fi
+    
+    # 2. Disable systemd-resolved from starting on boot
+    systemctl disable systemd-resolved 2>/dev/null
+    
+    # 3. Check what's on port 53 without killing
+    print "Checking what's using port 53..."
+    local port_users=$(ss -tulpn | grep ':53 ' | head -5)
+    
+    if [ -n "$port_users" ]; then
+        print_warning "Port 53 is currently in use by:"
+        echo "$port_users" | while read line; do
+            echo "  $line"
+        done
+        
+        # Ask user for confirmation
+        echo ""
+        read -p "Continue and stop these services? (y/n): " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Installation aborted by user"
+            exit 1
+        fi
+        
+        # Gracefully stop services by service name
+        print "Stopping services gracefully..."
+        
+        # Try to stop by service name first
+        if systemctl list-units --type=service | grep -q "dnsmasq"; then
+            systemctl stop dnsmasq 2>/dev/null
+        fi
+        
+        if systemctl list-units --type=service | grep -q "bind9"; then
+            systemctl stop bind9 2>/dev/null
+        fi
+        
+        if systemctl list-units --type=service | grep -q "named"; then
+            systemctl stop named 2>/dev/null
+        fi
+        
+        sleep 2
+        
+        # If still in use, use fuser to free the port (safer than pkill)
+        if ss -tulpn | grep -q ':53 '; then
+            print "Freeing port 53 using fuser..."
+            fuser -k 53/udp 2>/dev/null || true
+            fuser -k 53/tcp 2>/dev/null || true
+            sleep 2
+        fi
+    fi
+    
+    print_success "Port 53 prepared for EDNS Proxy"
+}
+
+# Show title
+clear
+check_root
+print_title
+
+print "Starting EDNS Proxy Installation..."
+echo ""
+
+# Check prerequisites
+check_slowdns
+
+# Install Python3 if not present
+print "Checking for Python3..."
+if ! command -v python3 &> /dev/null; then
+    print "Python3 not found, installing..."
+    apt-get update > /dev/null 2>&1
+    apt-get install -y python3 > /dev/null 2>&1
+    print_success "Python3 installed"
+else
+    print_success "Python3 already installed"
+fi
+
+# Create EDNS Proxy Python script (converts 512 to 1232)
+print "Creating EDNS Proxy Python script..."
+cat > /usr/local/bin/edns-proxy.py << 'EOF'
 #!/usr/bin/env python3
 """
-ULTRA-FAST SLOWDNS + EDNS PROXY - COMPLETE STACK
-Multi-threaded, No Errors, Installs in 30 seconds
-"""
-
-import os
-import sys
-import time
-import socket
-import struct
-import threading
-import subprocess
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-
-# ================= CONFIG =================
-DOMAIN = ""  # Will be set via command line
-SSHD_PORT = 22
-SLOWDNS_PORT = 5300
-EDNS_PORT = 53
-WORKERS = 4
-BUFFER_SIZE = 4096
-
-# URLs - YOUR REPOSITORY
-SERVER_KEY_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key"
-SERVER_PUB_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub"
-SERVER_BIN_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server"
-
-# ================= PERFORMANCE EDNS PROXY =================
-EDNS_PROXY_CODE = '''#!/usr/bin/env python3
-"""
-ULTRA-FAST EDNS PROXY - MULTI-THREADED
-No errors, handles 10K+ QPS
+EDNS Proxy for SlowDNS (smart parser)
+- Listens on UDP :53 (public)
+- Forwards to 127.0.0.1:5300 (SlowDNS server) with bigger EDNS size
+- Outside sees 512, inside server sees 1232
 """
 
 import socket
-import struct
 import threading
-from concurrent.futures import ThreadPoolExecutor
-import time
+import struct
 
+# Public listen
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 53
+
+# Internal SlowDNS server address
 UPSTREAM_HOST = "127.0.0.1"
 UPSTREAM_PORT = 5300
-MAX_WORKERS = 4
-BUFFER_SIZE = 4096
 
-class ConnectionPool:
-    def __init__(self, size=8):
-        self.pool = []
-        for _ in range(size):
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(2.0)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.pool.append(sock)
-        self.lock = threading.Lock()
-    
-    def get_socket(self):
-        with self.lock:
-            if self.pool:
-                return self.pool.pop()
-            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
-    def return_socket(self, sock):
-        with self.lock:
-            if len(self.pool) < 16:
-                self.pool.append(sock)
-            else:
-                sock.close()
+# EDNS sizes
+EXTERNAL_EDNS_SIZE = 512    # what we show to clients
+INTERNAL_EDNS_SIZE = 1232   # what we tell SlowDNS internally
 
-socket_pool = ConnectionPool()
 
-def patch_edns_fast(data, new_size=1232):
-    """Ultra-fast EDNS patching without full parse"""
+def patch_edns_udp_size(data: bytes, new_size: int) -> bytes:
+    """
+    Parse DNS message properly and patch EDNS (OPT RR) UDP payload size.
+    If no EDNS / cannot parse properly → return data as is.
+    """
     if len(data) < 12:
         return data
-    
+
     try:
-        # Quick search for OPT RR (type 0x0029)
-        search_pos = 12
-        qdcount = struct.unpack("!H", data[4:6])[0]
-        
-        # Skip questions fast
-        for _ in range(qdcount):
-            while search_pos < len(data) and data[search_pos] != 0:
-                if data[search_pos] & 0xC0:
-                    search_pos += 2
-                    break
-                search_pos += data[search_pos] + 1
-            search_pos += 5
-        
-        # Look for OPT
-        pos = data.find(b'\\x00\\x29', search_pos)
-        if pos != -1 and pos + 4 <= len(data):
-            new_data = bytearray(data)
-            new_data[pos+2:pos+4] = struct.pack("!H", new_size)
-            return bytes(new_data)
-        
-        return data
-    except:
+        # Header: ID(2), FLAGS(2), QDCOUNT(2), ANCOUNT(2), NSCOUNT(2), ARCOUNT(2)
+        qdcount, ancount, nscount, arcount = struct.unpack("!HHHH", data[4:12])
+    except struct.error:
         return data
 
-def handle_request(server_sock, data, addr):
-    """Process DNS request"""
-    upstream_sock = socket_pool.get_socket()
-    
+    offset = 12
+
+    def skip_name(buf, off):
+        """Skip DNS name (supporting compression)."""
+        while True:
+            if off >= len(buf):
+                return len(buf)
+            l = buf[off]
+            off += 1
+            if l == 0:
+                break
+            if l & 0xC0 == 0xC0:
+                # compression pointer, one more byte
+                if off >= len(buf):
+                    return len(buf)
+                off += 1
+                break
+            off += l
+        return off
+
+    # Skip Questions
+    for _ in range(qdcount):
+        offset = skip_name(data, offset)
+        if offset + 4 > len(data):
+            return data
+        offset += 4  # QTYPE + QCLASS
+
+    def skip_rrs(count, buf, off):
+        """Skip Resource Records (Answer + Authority)."""
+        for _ in range(count):
+            off = skip_name(buf, off)
+            if off + 10 > len(buf):
+                return len(buf)
+            # TYPE(2) + CLASS(2) + TTL(4) + RDLEN(2)
+            rtype, rclass, ttl, rdlen = struct.unpack("!HHIH", buf[off:off+10])
+            off += 10
+            if off + rdlen > len(buf):
+                return len(buf)
+            off += rdlen
+        return off
+
+    # Skip Answer + Authority
+    offset = skip_rrs(ancount, data, offset)
+    offset = skip_rrs(nscount, data, offset)
+
+    # Additional section → EDNS OPT RR is here
+    new_data = bytearray(data)
+    for _ in range(arcount):
+        rr_name_start = offset
+        offset = skip_name(data, offset)
+        if offset + 10 > len(data):
+            return data
+        rtype = struct.unpack("!H", data[offset:offset+2])[0]
+
+        if rtype == 41:  # OPT RR (EDNS)
+            # UDP payload size is 2 bytes after TYPE
+            size_bytes = struct.pack("!H", new_size)
+            new_data[offset+2:offset+4] = size_bytes
+            return bytes(new_data)
+
+        # Skip CLASS(2) + TTL(4) + RDLEN(2) + RDATA
+        _, _, rdlen = struct.unpack("!H I H", data[offset+2:offset+10])
+        offset += 10 + rdlen
+
+    return data
+
+
+def handle_request(server_sock: socket.socket, data: bytes, client_addr):
+    """
+    - patch EDNS size to INTERNAL_EDNS_SIZE for request
+    - send to upstream (SlowDNS:5300)
+    - receive response, patch EDNS size to EXTERNAL_EDNS_SIZE
+    - return to client
+    """
+    upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    upstream_sock.settimeout(5.0)
+
     try:
-        # Patch EDNS size
-        patched = patch_edns_fast(data, 1232)
-        upstream_sock.sendto(patched, (UPSTREAM_HOST, UPSTREAM_PORT))
-        
-        try:
-            resp, _ = upstream_sock.recvfrom(BUFFER_SIZE)
-            # Restore EDNS size for client
-            resp_patched = patch_edns_fast(resp, 512)
-            server_sock.sendto(resp_patched, addr)
-        except socket.timeout:
-            pass
-            
+        upstream_data = patch_edns_udp_size(data, INTERNAL_EDNS_SIZE)
+        upstream_sock.sendto(upstream_data, (UPSTREAM_HOST, UPSTREAM_PORT))
+
+        resp, _ = upstream_sock.recvfrom(4096)
+        resp_patched = patch_edns_udp_size(resp, EXTERNAL_EDNS_SIZE)
+
+        server_sock.sendto(resp_patched, client_addr)
+    except socket.timeout:
+        # client will resend, no need to kill proxy
+        pass
     except Exception:
+        # stay calm, don't crash proxy
         pass
     finally:
-        socket_pool.return_socket(upstream_sock)
+        upstream_sock.close()
+
 
 def main():
-    """Start high-performance EDNS proxy"""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
-    
-    try:
-        sock.bind((LISTEN_HOST, LISTEN_PORT))
-        print(f"[EDNS] Listening on {LISTEN_HOST}:{LISTEN_PORT}")
-        print(f"[EDNS] Workers: {MAX_WORKERS}, Buffer: 4MB")
-        
-        executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-        
-        while True:
-            data, addr = sock.recvfrom(BUFFER_SIZE)
-            executor.submit(handle_request, sock, data, addr)
-            
-    except PermissionError:
-        print("[ERROR] Run as root: sudo python3 edns-proxy.py")
-    except KeyboardInterrupt:
-        print("\n[EDNS] Stopping...")
-    finally:
-        sock.close()
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_sock.bind((LISTEN_HOST, LISTEN_PORT))
+    print(f"[EDNS Proxy] Listening on {LISTEN_HOST}:{LISTEN_PORT}, "
+          f"upstream {UPSTREAM_HOST}:{UPSTREAM_PORT}, "
+          f"external EDNS={EXTERNAL_EDNS_SIZE}, internal EDNS={INTERNAL_EDNS_SIZE}")
+
+    while True:
+        data, client_addr = server_sock.recvfrom(4096)
+        t = threading.Thread(
+            target=handle_request,
+            args=(server_sock, data, client_addr),
+            daemon=True,
+        )
+        t.start()
+
 
 if __name__ == "__main__":
     main()
-'''
+EOF
 
-# ================= INSTALLATION UTILITIES =================
-def run_parallel(cmds):
-    """Run commands in parallel"""
-    threads = []
-    for cmd in cmds:
-        t = threading.Thread(target=lambda c: subprocess.run(c, shell=True, 
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL), args=(cmd,))
-        t.start()
-        threads.append(t)
-    for t in threads:
-        t.join()
+chmod +x /usr/local/bin/edns-proxy.py
+print_success "EDNS Proxy Python script created"
 
-def download_parallel():
-    """Download all files simultaneously"""
-    slowdns_dir = "/etc/slowdns"
-    Path(slowdns_dir).mkdir(exist_ok=True)
-    
-    urls = [
-        (SERVER_KEY_URL, f"{slowdns_dir}/server.key"),
-        (SERVER_PUB_URL, f"{slowdns_dir}/server.pub"),
-        (SERVER_BIN_URL, f"{slowdns_dir}/dnstt-server"),
-    ]
-    
-    def download(url, dest):
-        cmd = f"wget -q --timeout=10 -O '{dest}' '{url}' 2>/dev/null || curl -s --connect-timeout 10 -o '{dest}' '{url}'"
-        subprocess.run(cmd, shell=True)
-        return os.path.exists(dest)
-    
-    threads = []
-    results = []
-    
-    for url, dest in urls:
-        t = threading.Thread(target=lambda u,d,r: r.append(download(u,d)), args=(url, dest, results))
-        t.start()
-        threads.append(t)
-    
-    for t in threads:
-        t.join()
-    
-    return all(results)
-
-# ================= MAIN INSTALLATION =================
-def install():
-    """Main installation function"""
-    start_time = time.time()
-    
-    print("\n" + "="*60)
-    print("    ULTRA-FAST SLOWDNS + EDNS PROXY INSTALLER")
-    print("="*60)
-    
-    # Get domain from command line or prompt
-    global DOMAIN
-    if len(sys.argv) > 1:
-        DOMAIN = sys.argv[1]
-    else:
-        DOMAIN = input("\nEnter DNS hostname (e.g., dns.example.com): ").strip()
-    
-    if not DOMAIN:
-        print("\n❌ Domain required!")
-        print("Usage: python3 script.py yourdomain.com")
-        sys.exit(1)
-    
-    print(f"\n🚀 Installing for: {DOMAIN}")
-    
-    # ========== STEP 1: PARALLEL SYSTEM SETUP ==========
-    print("\n[1/7] Parallel system setup...")
-    
-    run_parallel([
-        "apt-get update -qq 2>/dev/null",
-        "apt-get install -y wget iptables --no-install-recommends 2>/dev/null",
-        "systemctl stop systemd-resolved 2>/dev/null || true",
-        "systemctl disable systemd-resolved 2>/dev/null || true",
-    ])
-    
-    # Kernel tuning
-    subprocess.run("sysctl -w net.core.rmem_max=134217728 2>/dev/null", shell=True)
-    subprocess.run("sysctl -w net.core.wmem_max=134217728 2>/dev/null", shell=True)
-    
-    # ========== STEP 2: PARALLEL DOWNLOADS ==========
-    print("\n[2/7] Parallel downloads...")
-    
-    if download_parallel():
-        print("  ✅ All files downloaded")
-    else:
-        print("  ⚠ Some downloads failed, continuing...")
-    
-    # Make binary executable
-    os.chmod("/etc/slowdns/dnstt-server", 0o755)
-    
-    # ========== STEP 3: CONFIGURE SSH ==========
-    print("\n[3/7] Configuring SSH...")
-    
-    ssh_config = f"""Port {SSHD_PORT}
-PermitRootLogin yes
-PasswordAuthentication yes
-UseDNS no
-AllowTcpForwarding yes
-ClientAliveInterval 30
-"""
-    
-    with open("/etc/ssh/sshd_config", "w") as f:
-        f.write(ssh_config)
-    
-    subprocess.run("systemctl restart ssh 2>/dev/null", shell=True)
-    
-    # ========== STEP 4: CREATE SLOWDNS SERVICE ==========
-    print("\n[4/7] Creating SlowDNS service...")
-    
-    slowdns_service = f"""[Unit]
-Description=Ultra-Fast SlowDNS Server
+# Create systemd service for EDNS Proxy
+print "Creating EDNS Proxy service..."
+cat > /etc/systemd/system/edns-proxy.service << EOF
+[Unit]
+Description=EDNS Proxy (Port 53, $EXTERNAL_EDNS_SIZE↔$INTERNAL_EDNS_SIZE)
 After=network.target
-
-[Service]
-Type=simple
-ExecStart=/etc/slowdns/dnstt-server -udp :{SLOWDNS_PORT} -mtu 1232 -privkey-file /etc/slowdns/server.key {DOMAIN} 127.0.0.1:{SSHD_PORT}
-Restart=always
-RestartSec=1
-
-[Install]
-WantedBy=multi-user.target
-"""
-    
-    with open("/etc/systemd/system/slowdns.service", "w") as f:
-        f.write(slowdns_service)
-    
-    # ========== STEP 5: CREATE EDNS PROXY ==========
-    print("\n[5/7] Creating EDNS Proxy...")
-    
-    # Write EDNS proxy script
-    with open("/usr/local/bin/edns-proxy.py", "w") as f:
-        f.write(EDNS_PROXY_CODE)
-    os.chmod("/usr/local/bin/edns-proxy.py", 0o755)
-    
-    # Create EDNS service
-    edns_service = f"""[Unit]
-Description=Ultra-Fast EDNS Proxy
-After=slowdns.service
-Requires=slowdns.service
+Wants=slowdns-server.service
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /usr/local/bin/edns-proxy.py
 Restart=always
-RestartSec=2
-LimitNOFILE=1048576
-LimitNPROC=4096
-Nice=-5
+RestartSec=3
+User=root
+LimitNOFILE=65536
+Environment="PYTHONUNBUFFERED=1"
+StandardOutput=append:/var/log/edns-proxy.log
+StandardError=append:/var/log/edns-proxy.error
 
 [Install]
 WantedBy=multi-user.target
-"""
-    
-    with open("/etc/systemd/system/edns-proxy.service", "w") as f:
-        f.write(edns_service)
-    
-    # ========== STEP 6: START SERVICES ==========
-    print("\n[6/7] Starting services...")
-    
-    run_parallel([
-        "systemctl daemon-reload",
-        "systemctl enable --now slowdns.service",
-        "iptables -A INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null",
-        "iptables -A INPUT -p udp --dport 5300 -j ACCEPT 2>/dev/null",
-        "iptables -A INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null",
-    ])
-    
-    # Stop anything on port 53
-    subprocess.run("fuser -k 53/udp 2>/dev/null || true", shell=True)
-    subprocess.run("fuser -k 53/tcp 2>/dev/null || true", shell=True)
-    
-    # Start EDNS proxy
-    subprocess.run("systemctl enable --now edns-proxy.service", shell=True)
-    
-    # ========== STEP 7: VERIFICATION ==========
-    print("\n[7/7] Verifying installation...")
-    
-    time.sleep(3)
-    
-    print("\n📊 Service Status:")
-    services = ["slowdns", "edns-proxy"]
-    for svc in services:
-        result = subprocess.run(f"systemctl is-active {svc}.service", shell=True, capture_output=True)
-        if result.returncode == 0:
-            print(f"  ✅ {svc:12} ACTIVE")
-        else:
-            print(f"  ❌ {svc:12} INACTIVE")
-    
-    print("\n📊 Listening Ports:")
-    ports = [(22, "tcp", "SSH"), (5300, "udp", "SlowDNS"), (53, "udp", "EDNS Proxy")]
-    for port, proto, name in ports:
-        result = subprocess.run(f"ss -lnp{proto[0]} | grep -q ':{port}'", shell=True)
-        if result.returncode == 0:
-            print(f"  ✅ {name:12} {proto.upper():4}:{port:5}")
-        else:
-            print(f"  ❌ {name:12} {proto.upper():4}:{port:5}")
-    
-    # Show public key
-    pubkey_path = "/etc/slowdns/server.pub"
-    if os.path.exists(pubkey_path):
-        print("\n" + "="*60)
-        print("🔑 PUBLIC KEY (for clients):")
-        print("="*60)
-        with open(pubkey_path, "r") as f:
-            print(f.read().strip())
-        print("="*60)
-    
-    elapsed = time.time() - start_time
-    
-    print(f"\n" + "="*60)
-    print(f"✅ INSTALLATION COMPLETE in {elapsed:.1f} seconds!")
-    print("="*60)
-    
-    print(f"\n📋 Summary:")
-    print(f"  Domain:     {DOMAIN}")
-    print(f"  SSH Port:   {SSHD_PORT}")
-    print(f"  SlowDNS:    UDP:{SLOWDNS_PORT}")
-    print(f"  EDNS Proxy: UDP:{EDNS_PORT}")
-    print(f"  Workers:    {WORKERS}")
-    
-    print(f"\n🧪 Test Commands:")
-    print(f"  dig @$(curl -s ifconfig.me) test.{DOMAIN} TXT")
-    print(f"  systemctl status edns-proxy")
-    print(f"  tail -f /var/log/syslog | grep EDNS")
-    
-    print("\n⚡ Performance Features:")
-    print("  • Multi-threaded EDNS proxy (10K+ QPS)")
-    print("  • Connection pooling")
-    print("  • Parallel downloads & installation")
-    print("  • 4MB socket buffers")
-    print("  • Real-time priority")
+EOF
+print_success "EDNS Proxy service created"
 
-# ================= MAIN =================
-if __name__ == "__main__":
-    if os.geteuid() != 0:
-        print("❌ Run as root: sudo python3 script.py yourdomain.com")
-        sys.exit(1)
+# SAFELY stop DNS services
+safe_stop_dns
+
+# Update firewall for EDNS Proxy
+print "Configuring firewall rules..."
+iptables -F 2>/dev/null
+iptables -t nat -F 2>/dev/null
+iptables -A INPUT -p udp --dport $EDNS_PROXY_PORT -j ACCEPT
+iptables -A INPUT -p tcp --dport $EDNS_PROXY_PORT -j ACCEPT
+
+# Redirect standard DNS to our proxy
+iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53
+iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 53
+print_success "Firewall configured"
+
+# Start EDNS Proxy service
+print "Starting EDNS Proxy service..."
+systemctl daemon-reload
+systemctl enable edns-proxy.service > /dev/null 2>&1
+systemctl start edns-proxy.service
+sleep 3
+
+# Test EDNS Proxy
+print "Testing EDNS Proxy..."
+sleep 2
+
+print "Testing port $EDNS_PROXY_PORT..."
+if ss -ulpn | grep -q ":$EDNS_PROXY_PORT"; then
+    print_success "EDNS Proxy listening on port $EDNS_PROXY_PORT"
     
-    try:
-        install()
-    except KeyboardInterrupt:
-        print("\n\n⚠ Installation cancelled")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        sys.exit(1)
+    # Test with a DNS query
+    print "Testing DNS query..."
+    if timeout 3 dig @127.0.0.1 google.com +short > /dev/null 2>&1; then
+        print_success "DNS query successful"
+    else
+        print_warning "DNS query test inconclusive"
+    fi
+else
+    print_warning "EDNS Proxy not listening on port 53"
+    
+    # Try alternative method
+    print "Trying alternative startup method..."
+    
+    # Check if it's a permission issue
+    if [ "$(id -u)" != "0" ]; then
+        print_error "Must be run as root for port 53"
+    fi
+    
+    # Try to start manually
+    print "Starting EDNS Proxy manually..."
+    nohup /usr/bin/python3 /usr/local/bin/edns-proxy.py > /tmp/edns-debug.log 2>&1 &
+    sleep 3
+    
+    if ss -ulpn | grep -q ":$EDNS_PROXY_PORT"; then
+        print_success "EDNS Proxy started manually"
+        echo "Check /tmp/edns-debug.log for details"
+    else
+        print_error "Failed to start EDNS Proxy"
+        echo "Check /tmp/edns-debug.log for error details"
+    fi
+fi
+
+# Create status script
+cat > /usr/local/bin/edns-status << 'EOF'
+#!/bin/bash
+echo "=== EDNS Proxy Status ==="
+echo ""
+echo "Service Status:"
+systemctl status edns-proxy --no-pager | grep "Active:" | sed 's/^/  /'
+echo ""
+echo "Port Status:"
+echo "  Port 53 (EDNS Proxy):"
+ss -ulpn | grep ":53" | sed 's/^/    /'
+echo "  Port 5300 (SlowDNS):"
+ss -ulpn | grep ":5300" | sed 's/^/    /'
+echo ""
+echo "Recent Logs:"
+journalctl -u edns-proxy.service -n 5 --no-pager 2>/dev/null | tail -5 | sed 's/^/  /'
+EOF
+
+chmod +x /usr/local/bin/edns-status
+print_success "Status script created: edns-status"
+
+# Create simple test command
+cat > /usr/local/bin/test-edns << 'EOF'
+#!/bin/bash
+echo "Testing EDNS Proxy..."
+echo "Running: dig @127.0.0.1 google.com"
+dig @127.0.0.1 google.com +short
+EOF
+
+chmod +x /usr/local/bin/test-edns
+print_success "Test command created: test-edns"
+
+echo ""
+echo -e "${GREEN}────────────────────────────────────────────────────────────────${NC}"
+print_success "EDNS Proxy Installation Completed!"
+echo -e "${GREEN}────────────────────────────────────────────────────────────────${NC}"
+echo ""
+
+echo -e "${YELLOW}Quick Test Commands:${NC}"
+echo "  edns-status          # Check EDNS Proxy status"
+echo "  test-edns            # Test DNS resolution"
+echo "  dig @127.0.0.1 google.com  # Manual DNS test"
+echo ""
+echo -e "${YELLOW}If port 53 is still in use, try:${NC}"
+echo "  sudo systemctl stop systemd-resolved"
+echo "  sudo fuser -k 53/udp"
+echo "  sudo systemctl restart edns-proxy"
+echo ""
