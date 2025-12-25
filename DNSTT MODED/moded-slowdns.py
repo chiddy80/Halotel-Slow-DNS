@@ -35,11 +35,10 @@ SLOWDNS_FILES = {
     'server.pub': [
         'https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub'
     ],
-    'dnstt-client': [  # Changed from sldns-server to dnstt-client
+    'dnstt-client': [  # <-- WRONG FILENAME, CHANGE THIS KEY AND URL
         'https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-client'
     ]
 }
-
 def print_success(msg):
     print(f"{GREEN}[✓]{NC} {msg}")
 
