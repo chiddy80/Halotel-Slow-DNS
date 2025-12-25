@@ -10,7 +10,6 @@ WHITE='\033[1;37m'
 NC='\033[0m'
 
 # Configuration
-REQUIRED_PASSWORD="ESIMFREEGB"
 SCRIPT1_URL="https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt1.sh"
 SCRIPT2_URL="https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt2.sh"
 
@@ -23,31 +22,6 @@ echo -e "${BLUE}===============================================================$
 echo -e "${WHITE}                  SCRIPT BY ESIM FREE GB${NC}"
 echo -e "${BLUE}===============================================================${NC}"
 echo ""
-
-# Password check
-echo -e "${YELLOW}──────────────────────────────────────────────────────────────${NC}"
-echo -e "${WHITE}              PASSWORD REQUIRED${NC}"
-echo -e "${YELLOW}──────────────────────────────────────────────────────────────${NC}"
-echo ""
-
-# Check password
-for i in {1..3}; do
-    echo -n -e "${CYAN}[?] Password (try $i/3): ${NC}"
-    read -s password
-    echo ""
-    
-    if [ "$password" = "$REQUIRED_PASSWORD" ]; then
-        echo -e "${GREEN}[✓] Access granted${NC}"
-        echo ""
-        break
-    else
-        echo -e "${RED}[✗] Wrong password${NC}"
-        if [ $i -eq 3 ]; then
-            echo -e "${RED}[✗] Too many failed attempts${NC}"
-            exit 1
-        fi
-    fi
-done
 
 # Check root
 if [ "$EUID" -ne 0 ]; then
@@ -124,5 +98,5 @@ echo ""
 echo -e "${YELLOW}Script 1: $SCRIPT1_URL${NC}"
 echo -e "${YELLOW}Script 2: $SCRIPT2_URL${NC}"
 echo ""
-echo -e "${BLUE}Thank you for using Tanzania SlowDNS Script${NC}"
+echo -e "${BLUE}Thank you for using ESIMFREEGB SlowDNS Script${NC}"
 echo ""
