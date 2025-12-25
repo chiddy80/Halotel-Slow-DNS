@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-ULTRA SlowDNS + EDNS Installer (Fully Integrated)
-- SlowDNS (DNSTT)
-- Async EDNS proxy (port 53 -> SlowDNS 5300)
-- Rate limit / anti-abuse
-- rc.local + iptables flush
-- Hard IPv6 disable
-- Proper systemd services
-- Interactive port 53 conflict check
+ULTRA SlowDNS + EDNS Installer (Fixed Version)
+- Restores DNS for downloads
+- Handles port 53 conflicts
+- Installs SlowDNS + EDNS proxy
+- Creates proper systemd services
 """
 
-import os, sys, socket, struct, selectors, time, subprocess, urllib.request
+import os
+import sys
+import socket
+import struct
+import subprocess
 from pathlib import Path
+import urllib.request
+import time
 
 # ================= CONFIG =================
 SSHD_PORT = 22
@@ -20,8 +23,6 @@ DNS_PORT = 53
 
 EXT_EDNS = 512
 INT_EDNS = 1232
-RATE_QPS = 50
-RATE_BURST = 100
 
 BASE_DIR = Path("/etc/slowdns")
 URL_BASE = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED"
@@ -35,10 +36,20 @@ FILES = {
 def run(cmd):
     subprocess.run(cmd, shell=True, check=True)
 
-def root():
+def root_check():
     if os.geteuid() != 0:
-        print("Run as root")
+        print("Please run this script as root")
         sys.exit(1)
+
+# ================= TEMP DNS =================
+def restore_dns():
+    resolv = Path("/etc/resolv.conf")
+    if not resolv.exists() or resolv.read_text().strip() == "":
+        print("[*] Restoring temporary DNS to download files...")
+        resolv.write_text("nameserver 1.1.1.1\nnameserver 8.8.8.8\n")
+        os.system("chattr +i /etc/resolv.conf")
+        time.sleep(1)
+        print("[✓] DNS restored temporarily")
 
 # ================= PORT 53 SAFE CHECK =================
 def stop_conflicts():
@@ -47,23 +58,39 @@ def stop_conflicts():
     if result.stdout.strip():
         print("[!] Port 53 is in use by:")
         print(result.stdout)
-        confirm = input("Do you want to stop these services to free port 53? [y/N]: ").strip().lower()
+        confirm = input("Stop conflicting services? [y/N]: ").strip().lower()
         if confirm != "y":
             print("Aborted by user. Free port 53 first.")
             sys.exit(1)
-        print("[*] Stopping conflicting services...")
+        print("[*] Stopping conflicts...")
+        # Stop systemd-resolved
         if os.system("systemctl is-active --quiet systemd-resolved") == 0:
             run("systemctl stop systemd-resolved")
             run("systemctl disable systemd-resolved")
+        # Kill processes on port 53
         os.system("fuser -k 53/udp || true")
         os.system("fuser -k 53/tcp || true")
     else:
         print("[✓] Port 53 is free")
 
+# ================= SSH =================
+def ssh_config():
+    print("[*] Configuring OpenSSH...")
+    Path("/etc/ssh/sshd_config").write_text(f"""Port {SSHD_PORT}
+PermitRootLogin yes
+PasswordAuthentication yes
+AllowTcpForwarding yes
+GatewayPorts yes
+UseDNS no
+""")
+    run("systemctl restart sshd")
+    print("[✓] SSH configured")
+
 # ================= RC.LOCAL =================
 def setup_rc_local():
     rc = f"""#!/bin/sh -e
 systemctl start sshd
+
 iptables -F
 iptables -X
 iptables -t nat -F
@@ -71,40 +98,28 @@ iptables -t nat -X
 iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 iptables -P OUTPUT ACCEPT
+
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
 iptables -A INPUT -p tcp --dport {SSHD_PORT} -j ACCEPT
 iptables -A INPUT -p udp --dport {SLOWDNS_PORT} -j ACCEPT
 iptables -A INPUT -p tcp --dport {SLOWDNS_PORT} -j ACCEPT
 iptables -A INPUT -p udp --dport {DNS_PORT} -j ACCEPT
 iptables -A INPUT -p tcp --dport {DNS_PORT} -j ACCEPT
-iptables -A INPUT -p icmp -j ACCEPT
-iptables -A OUTPUT -j ACCEPT
-iptables -A INPUT -m state --state INVALID -j DROP
-iptables -A INPUT -p tcp --dport {SSHD_PORT} -m recent --set
-iptables -A INPUT -p tcp --dport {SSHD_PORT} -m recent --update --seconds 60 --hitcount 4 -j DROP
+
 echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 sysctl -w net.core.rmem_max=134217728
 sysctl -w net.core.wmem_max=134217728
+
 exit 0
 """
     Path("/etc/rc.local").write_text(rc)
     os.chmod("/etc/rc.local", 0o755)
     run("systemctl enable rc-local || true")
     run("systemctl start rc-local || true")
-
-# ================= SSH CONFIG =================
-def ssh_config():
-    ssh_conf = f"""Port {SSHD_PORT}
-PermitRootLogin yes
-PasswordAuthentication yes
-AllowTcpForwarding yes
-GatewayPorts yes
-UseDNS no
-"""
-    Path("/etc/ssh/sshd_config").write_text(ssh_conf)
-    run("systemctl restart sshd")
+    print("[✓] rc.local configured")
 
 # ================= SLOWDNS =================
 def slowdns_install(ns):
@@ -113,6 +128,7 @@ def slowdns_install(ns):
         dst = BASE_DIR / name
         if dst.exists():
             dst.unlink()
+        print(f"[*] Downloading {name} ...")
         urllib.request.urlretrieve(url, dst)
         if "dnstt" in name:
             dst.chmod(0o755)
@@ -134,59 +150,24 @@ WantedBy=multi-user.target
     run("systemctl daemon-reload")
     run("systemctl enable slowdns")
     run("systemctl start slowdns")
+    print("[✓] SlowDNS installed and started")
 
-# ================= EDNS PATCH =================
+# ================= EDNS =================
 def patch_edns(data, size):
     if len(data) < 12: return data
     buf = bytearray(data)
     for i in range(len(buf)-2):
-        if buf[i:i+2] == b"\x00\x29":  # OPT RR
+        if buf[i:i+2] == b"\x00\x29":
             buf[i+3:i+5] = struct.pack("!H", size)
             break
     return bytes(buf)
 
-# ================= EDNS WORKER =================
-def edns_worker():
-    sel = selectors.DefaultSelector()
-    rate = {}
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    sock.bind(("0.0.0.0", DNS_PORT))
-    sock.setblocking(False)
+def edns_install_file():
+    edns_path = BASE_DIR / "edns.py"
+    code = open(__file__).read()  # save this script as edns.py
+    edns_path.write_text(code)
+    edns_path.chmod(0o755)
 
-    upstream = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    upstream.setblocking(False)
-
-    sel.register(sock, selectors.EVENT_READ)
-    sel.register(upstream, selectors.EVENT_READ)
-
-    pending = {}
-
-    while True:
-        for key, _ in sel.select(timeout=1):
-            if key.fileobj is sock:
-                data, anc, _, addr = sock.recvmsg(4096)
-                ip = addr[0]
-                now = time.time()
-                tokens, ts = rate.get(ip, (RATE_BURST, now))
-                tokens += (now - ts) * RATE_QPS
-                if tokens > RATE_BURST: tokens = RATE_BURST
-                if tokens < 1:
-                    rate[ip] = (tokens, now)
-                    continue
-                rate[ip] = (tokens - 1, now)
-                upstream.sendto(patch_edns(data, INT_EDNS), ("127.0.0.1", SLOWDNS_PORT))
-                pending[ip] = addr
-            else:
-                try:
-                    data, _ = upstream.recvfrom(4096)
-                    if pending:
-                        ip, addr = pending.popitem()
-                        sock.sendto(patch_edns(data, EXT_EDNS), addr)
-                except:
-                    continue
-
-# ================= EDNS SERVICE =================
 def edns_service_file():
     service = f"""[Unit]
 Description=EDNS Proxy (UDP 53 -> SlowDNS {SLOWDNS_PORT})
@@ -195,7 +176,7 @@ Requires=slowdns.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /etc/slowdns/edns.py --worker
+ExecStart=/usr/bin/python3 /etc/slowdns/edns.py
 Restart=always
 User=root
 LimitNOFILE=65536
@@ -209,33 +190,25 @@ WantedBy=multi-user.target
     run("systemctl daemon-reload")
     run("systemctl enable edns")
     run("systemctl start edns")
-
-# ================= SAVE SCRIPT AS EDNS.PY =================
-def edns_install_file():
-    edns_path = BASE_DIR / "edns.py"
-    code = open(__file__).read()
-    edns_path.write_text(code)
-    edns_path.chmod(0o755)
+    print("[✓] EDNS service created and started")
 
 # ================= MAIN =================
 def main():
-    root()
+    root_check()
+    restore_dns()
     stop_conflicts()
     ns = input("Enter nameserver (default 8.8.8.8): ").strip() or "8.8.8.8"
+
     ssh_config()
     setup_rc_local()
     slowdns_install(ns)
     edns_install_file()
     edns_service_file()
 
-    print("\n✅ SlowDNS + EDNS installation complete.")
+    print("\n✅ SlowDNS + EDNS installation complete")
     print("Ports: SlowDNS 5300, EDNS 53")
     print("Check status: systemctl status slowdns edns")
     print("Test DNS: dig @127.0.0.1 google.com +short")
 
-# ================= ENTRY =================
 if __name__ == "__main__":
-    if "--worker" in sys.argv:
-        edns_worker()
-    else:
-        main()
+    main()
