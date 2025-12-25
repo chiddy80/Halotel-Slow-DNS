@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-EDNS Proxy for SlowDNS - Smooth Running Version
-Handles port conflicts gracefully and ensures clean startup
+EDNS Proxy for SlowDNS - Clean & Reliable
 """
 
 import socket
@@ -10,9 +9,7 @@ import struct
 import sys
 import os
 import time
-import signal
 import subprocess
-from datetime import datetime
 
 # Configuration
 EXTERNAL_EDNS_SIZE = 512
@@ -21,103 +18,68 @@ LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 53
 UPSTREAM_HOST = "127.0.0.1"
 UPSTREAM_PORT = 5300
-ALT_PORT = 5353  # Alternative port if 53 fails
 
-def log_message(level, message):
-    """Clean logging without colors for better compatibility."""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    levels = {
-        'INFO': '[*]',
-        'SUCCESS': '[✓]',
-        'ERROR': '[✗]',
-        'WARNING': '[!]'
-    }
-    print(f"[{timestamp}] {levels.get(level, '[*]')} {message}")
+def print_status(msg):
+    print(f"[*] {msg}")
 
-def is_slowdns_running():
-    """Check if SlowDNS is running on port 5300."""
+def print_success(msg):
+    print(f"[✓] {msg}")
+
+def print_error(msg):
+    print(f"[✗] {msg}")
+
+def print_warning(msg):
+    print(f"[!] {msg}")
+
+def check_slowdns():
+    """Check if SlowDNS is running."""
     try:
-        test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        test_sock.settimeout(1)
-        test_sock.sendto(b"\x00" * 12, (UPSTREAM_HOST, UPSTREAM_PORT))
-        test_sock.close()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(1)
+        sock.sendto(b"\x00" * 12, (UPSTREAM_HOST, UPSTREAM_PORT))
+        sock.close()
         return True
     except:
         return False
 
-def get_port_53_users():
-    """Get detailed info about what's using port 53."""
-    users = []
+def free_port_53():
+    """Stop services using port 53."""
+    print_status("Checking port 53...")
     
-    # Check with ss
+    # Check if port 53 is in use
     try:
-        result = subprocess.run(['ss', '-tulpn'], capture_output=True, text=True)
-        for line in result.stdout.split('\n'):
-            if ':53 ' in line:
-                users.append(line.strip())
-    except:
-        pass
-    
-    # Check with lsof
-    try:
-        result = subprocess.run(['lsof', '-i', ':53'], capture_output=True, text=True)
-        for line in result.stdout.split('\n')[1:]:
-            if line.strip():
-                users.append(line.strip())
-    except:
-        pass
-    
-    return users
-
-def stop_dns_services_safely():
-    """Safely stop DNS services using port 53."""
-    log_message('INFO', 'Checking port 53 usage...')
-    users = get_port_53_users()
-    
-    if not users:
-        log_message('SUCCESS', 'Port 53 is available')
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        test_sock.bind((LISTEN_HOST, LISTEN_PORT))
+        test_sock.close()
+        print_success("Port 53 is available")
         return True
+    except OSError:
+        print_warning("Port 53 is in use")
     
-    log_message('WARNING', f'Port 53 is in use by {len(service)} service(s):')
-    for user in users[:3]:  # Show first 3
-        print(f"  → {user}")
+    # Stop common DNS services
+    services = ['systemd-resolved', 'dnsmasq', 'bind9', 'named']
     
-    # Common DNS services to stop
-    services_to_stop = [
-        'systemd-resolved',
-        'dnsmasq',
-        'bind9',
-        'named',
-        'unbound',
-        'stubby'
-    ]
-    
-    log_message('INFO', 'Attempting to stop DNS services...')
-    
-    stopped_count = 0
-    for service in services_to_stop:
+    for service in services:
         try:
-            # Check if service exists and is running
+            # Check if service exists
             result = subprocess.run(
-                ['systemctl', 'is-active', service],
+                ['systemctl', 'list-unit-files', f'{service}.service'],
                 capture_output=True,
                 text=True
             )
-            if result.returncode == 0:  # Service is active
-                log_message('INFO', f'Stopping {service}...')
-                subprocess.run(['systemctl', 'stop', service], check=False)
-                subprocess.run(['systemctl', 'disable', service], check=False)
-                stopped_count += 1
-                time.sleep(0.5)
+            
+            if 'enabled' in result.stdout or 'disabled' in result.stdout:
+                print_status(f"Stopping {service}...")
+                subprocess.run(['systemctl', 'stop', service], capture_output=True)
+                subprocess.run(['systemctl', 'disable', service], capture_output=True)
         except:
             continue
     
-    # Also try to kill processes using fuser
+    # Kill any remaining processes on port 53
     try:
-        log_message('INFO', 'Clearing remaining processes on port 53...')
         subprocess.run(['fuser', '-k', '53/udp'], capture_output=True)
         subprocess.run(['fuser', '-k', '53/tcp'], capture_output=True)
-        time.sleep(1)
+        time.sleep(2)
     except:
         pass
     
@@ -126,132 +88,136 @@ def stop_dns_services_safely():
         test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         test_sock.bind((LISTEN_HOST, LISTEN_PORT))
         test_sock.close()
-        log_message('SUCCESS', 'Port 53 is now available')
+        print_success("Port 53 is now free")
         return True
     except OSError:
-        log_message('WARNING', 'Port 53 still in use, will use alternative port')
+        print_error("Cannot free port 53")
         return False
 
-def create_redirect_rules():
-    """Create iptables rules to redirect DNS traffic."""
-    log_message('INFO', 'Setting up iptables redirect rules...')
-    
-    rules = [
-        'iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5353',
-        'iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 5353',
-        'iptables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 5353',
-        'iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 5353'
-    ]
-    
-    for rule in rules:
-        try:
-            subprocess.run(rule.split(), check=False)
-        except:
-            pass
-    
-    log_message('SUCCESS', 'Redirect rules created')
-
-def patch_edns_size(data, new_size):
-    """Patch EDNS UDP payload size in DNS packet."""
+def patch_edns(data, new_size):
+    """Patch EDNS size in DNS packet."""
     if len(data) < 12:
         return data
     
     try:
         qdcount, ancount, nscount, arcount = struct.unpack("!HHHH", data[4:12])
-    except struct.error:
+    except:
         return data
     
     offset = 12
     
-    def skip_name(buf, pos):
-        """Skip DNS name with compression."""
-        while pos < len(buf):
-            length = buf[pos]
-            pos += 1
-            if length == 0:
-                break
-            if length & 0xC0 == 0xC0:
-                pos += 1
-                break
-            pos += length
-        return pos
-    
     # Skip questions
     for _ in range(qdcount):
-        offset = skip_name(data, offset)
-        if offset + 4 > len(data):
+        while offset < len(data) and data[offset] != 0:
+            offset += 1
+        if offset + 5 >= len(data):
             return data
-        offset += 4
+        offset += 5
     
     # Skip answers and authority
-    def skip_rrs(count):
-        nonlocal offset
-        for _ in range(count):
-            offset = skip_name(data, offset)
-            if offset + 10 > len(data):
-                return False
-            rdlen = struct.unpack("!H", data[offset+8:offset+10])[0]
-            offset += 10 + rdlen
-        return True
-    
-    if not skip_rrs(ancount) or not skip_rrs(nscount):
-        return data
+    for _ in range(ancount + nscount):
+        while offset < len(data) and data[offset] != 0:
+            offset += 1
+        if offset + 11 >= len(data):
+            return data
+        rdlen = struct.unpack("!H", data[offset+9:offset+11])[0]
+        offset += 11 + rdlen
     
     # Find and patch EDNS OPT
     for _ in range(arcount):
-        name_start = offset
-        offset = skip_name(data, offset)
-        if offset + 4 > len(data):
+        while offset < len(data) and data[offset] != 0:
+            offset += 1
+        if offset + 11 >= len(data):
             return data
         
-        rtype = struct.unpack("!H", data[offset:offset+2])[0]
-        if rtype == 41:  # OPT RR
+        rtype = struct.unpack("!H", data[offset+1:offset+3])[0]
+        if rtype == 41:  # OPT
             new_data = bytearray(data)
-            new_data[offset+2:offset+4] = struct.pack("!H", new_size)
+            new_data[offset+3:offset+5] = struct.pack("!H", new_size)
             return bytes(new_data)
         
-        if offset + 10 > len(data):
-            return data
-        rdlen = struct.unpack("!H", data[offset+8:offset+10])[0]
-        offset += 10 + rdlen
+        rdlen = struct.unpack("!H", data[offset+9:offset+11])[0]
+        offset += 11 + rdlen
     
     return data
 
-def handle_client(server_sock, data, client_addr, stats):
-    """Handle DNS client request."""
+def handle_query(sock, data, addr, stats):
+    """Handle DNS query."""
     stats['requests'] += 1
     
-    upstream_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    upstream_sock.settimeout(5.0)
+    upstream = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    upstream.settimeout(3.0)
     
     try:
-        # Forward to SlowDNS with larger EDNS
-        request = patch_edns_size(data, INTERNAL_EDNS_SIZE)
-        upstream_sock.sendto(request, (UPSTREAM_HOST, UPSTREAM_PORT))
+        # Forward to SlowDNS
+        query = patch_edns(data, INTERNAL_EDNS_SIZE)
+        upstream.sendto(query, (UPSTREAM_HOST, UPSTREAM_PORT))
         
-        response, _ = upstream_sock.recvfrom(4096)
+        # Get response
+        response, _ = upstream.recvfrom(4096)
+        response = patch_edns(response, EXTERNAL_EDNS_SIZE)
+        sock.sendto(response, addr)
+        
         stats['responses'] += 1
         
-        # Return to client with smaller EDNS
-        response = patch_edns_size(response, EXTERNAL_EDNS_SIZE)
-        server_sock.sendto(response, client_addr)
-        
+        # Log every 50 requests
+        if stats['requests'] % 50 == 0:
+            print_status(f"Processed {stats['requests']} requests")
+            
     except socket.timeout:
         stats['timeouts'] += 1
     except ConnectionRefusedError:
         stats['errors'] += 1
-        log_message('ERROR', 'SlowDNS not responding')
-    except Exception as e:
+        if stats['errors'] == 1:  # Only show once
+            print_error("SlowDNS not responding")
+    except:
         stats['errors'] += 1
     finally:
-        upstream_sock.close()
-        
-    # Log every 100 requests
-    if stats['requests'] % 100 == 0:
-        log_message('INFO', f'Processed {stats["requests"]} requests')
+        upstream.close()
 
-def run_proxy(port):
-    """Run the EDNS proxy on specified port."""
+def run_edns_proxy():
+    """Run the EDNS proxy."""
+    # Display banner
+    print("\n" + "="*60)
+    print("              EDNS PROXY FOR SLOWDNS")
+    print("="*60)
+    print(f"External EDNS: {EXTERNAL_EDNS_SIZE}")
+    print(f"Internal EDNS: {INTERNAL_EDNS_SIZE}")
+    print(f"Listen Port:   {LISTEN_PORT}")
+    print(f"SlowDNS Port:  {UPSTREAM_PORT}")
+    print("="*60 + "\n")
+    
+    # Check root
+    if os.geteuid() != 0:
+        print_error("Must run as root")
+        print("Use: sudo python3 edns-proxy.py")
+        sys.exit(1)
+    
+    # Check SlowDNS
+    print_status("Checking SlowDNS...")
+    if not check_slowdns():
+        print_error(f"SlowDNS not running on {UPSTREAM_HOST}:{UPSTREAM_PORT}")
+        sys.exit(1)
+    print_success("SlowDNS is running")
+    
+    # Free port 53
+    if not free_port_53():
+        print_error("Cannot continue without port 53")
+        sys.exit(1)
+    
+    # Create socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((LISTEN_HOST, LISTEN_PORT))
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+    except OSError as e:
+        print_error(f"Cannot bind to port {LISTEN_PORT}: {e}")
+        sys.exit(1)
+    
+    print_success(f"EDNS Proxy started on port {LISTEN_PORT}")
+    print_status("Press Ctrl+C to stop\n")
+    
+    # Statistics
     stats = {
         'requests': 0,
         'responses': 0,
@@ -260,89 +226,44 @@ def run_proxy(port):
         'start_time': time.time()
     }
     
-    # Create socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
-    
+    # Main loop
     try:
-        sock.bind((LISTEN_HOST, port))
-        log_message('SUCCESS', f'EDNS Proxy started on port {port}')
-        log_message('INFO', f'Forwarding to {UPSTREAM_HOST}:{UPSTREAM_PORT}')
-        log_message('INFO', f'EDNS: {EXTERNAL_EDNS_SIZE} ↔ {INTERNAL_EDNS_SIZE}')
-        print("\n" + "="*60)
-        print("EDNS Proxy is running. Press Ctrl+C to stop.")
-        print("="*60 + "\n")
-        
-        # Main loop
         while True:
             try:
                 data, addr = sock.recvfrom(4096)
                 thread = threading.Thread(
-                    target=handle_client,
+                    target=handle_query,
                     args=(sock, data, addr, stats),
                     daemon=True
                 )
                 thread.start()
             except KeyboardInterrupt:
                 break
-                
-    except OSError as e:
-        log_message('ERROR', f'Failed to bind to port {port}: {e}')
-        return False
+    except KeyboardInterrupt:
+        pass
     finally:
         sock.close()
         
-        # Print statistics
+        # Show statistics
         runtime = time.time() - stats['start_time']
-        log_message('INFO', f'Runtime: {runtime:.1f}s')
-        log_message('INFO', f'Requests: {stats["requests"]}')
-        log_message('INFO', f'Responses: {stats["responses"]}')
-        log_message('INFO', f'Success rate: {(stats["responses"]/max(stats["requests"],1)*100):.1f}%')
-    
-    return True
+        print("\n" + "="*60)
+        print("Statistics:")
+        print(f"  Runtime:      {runtime:.1f} seconds")
+        print(f"  Requests:     {stats['requests']}")
+        print(f"  Responses:    {stats['responses']}")
+        print(f"  Success Rate: {(stats['responses']/max(stats['requests'],1)*100):.1f}%")
+        print(f"  Timeouts:     {stats['timeouts']}")
+        print(f"  Errors:       {stats['errors']}")
+        print("="*60)
+        print_success("EDNS Proxy stopped")
 
 def main():
-    """Main entry point with smooth error handling."""
-    print("\n" + "="*60)
-    print("          EDNS PROXY FOR SLOWDNS - SMOOTH EDITION")
-    print("="*60 + "\n")
-    
-    # Check root privileges
-    if os.geteuid() != 0:
-        log_message('ERROR', 'This script requires root privileges')
-        log_message('INFO', 'Please run with: sudo python3 edns-proxy.py')
-        sys.exit(1)
-    
-    # Check SlowDNS
-    log_message('INFO', 'Checking SlowDNS connection...')
-    if not is_slowdns_running():
-        log_message('ERROR', f'SlowDNS not found on {UPSTREAM_HOST}:{UPSTREAM_PORT}')
-        log_message('INFO', 'Please start SlowDNS first')
-        sys.exit(1)
-    log_message('SUCCESS', 'SlowDNS is running')
-    
-    # Try to free port 53
-    port_to_use = LISTEN_PORT
-    
-    if stop_dns_services_safely():
-        log_message('SUCCESS', 'Port 53 successfully freed')
-    else:
-        log_message('WARNING', 'Using alternative port 5353')
-        log_message('INFO', 'Setting up port redirect...')
-        create_redirect_rules()
-        port_to_use = ALT_PORT
-    
-    # Run proxy
+    """Main entry point with error handling."""
     try:
-        success = run_proxy(port_to_use)
-        if not success and port_to_use == LISTEN_PORT:
-            log_message('WARNING', 'Falling back to port 5353...')
-            create_redirect_rules()
-            run_proxy(ALT_PORT)
-    except KeyboardInterrupt:
-        log_message('INFO', '\nProxy stopped by user')
+        run_edns_proxy()
     except Exception as e:
-        log_message('ERROR', f'Unexpected error: {e}')
+        print_error(f"Unexpected error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
