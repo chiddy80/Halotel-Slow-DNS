@@ -49,9 +49,9 @@ cat > /etc/ssh/sshd_config << EOF
 # OpenSSH Configuration
 Port $SSHD_PORT
 Protocol 2
-PermitRootLogin prohibit-password
+PermitRootLogin yes
 PubkeyAuthentication yes
-PasswordAuthentication no
+PasswordAuthentication yes
 PermitEmptyPasswords no
 ChallengeResponseAuthentication no
 UsePAM yes
