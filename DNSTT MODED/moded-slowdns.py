@@ -27,7 +27,7 @@ SLOWDNS_PORT = 5300
 EXTERNAL_EDNS_SIZE = 512
 INTERNAL_EDNS_SIZE = 1800
 
-# YOUR GitHub files
+# YOUR GitHub files - CORRECTED DICTIONARY
 SLOWDNS_FILES = {
     'server.key': [
         'https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key'
@@ -35,10 +35,11 @@ SLOWDNS_FILES = {
     'server.pub': [
         'https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub'
     ],
-    ''dnstt-server': [
-    'https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server'
-]
+    'dnstt-server': [  # CHANGED from 'dnstt-client' to 'dnstt-server'
+        'https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server'
+    ]
 }
+
 def print_success(msg):
     print(f"{GREEN}[✓]{NC} {msg}")
 
@@ -136,8 +137,8 @@ UseDNS no
         return False
 
 def setup_slowdns():
-    """Setup SlowDNS (dnstt-client)."""
-    print_warning("Setting up SlowDNS (dnstt-client)...")
+    """Setup SlowDNS (dnstt-server)."""
+    print_warning("Setting up SlowDNS (dnstt-server)...")
     
     # Create directory
     os.makedirs('/etc/slowdns', exist_ok=True)
@@ -157,8 +158,8 @@ def setup_slowdns():
             print_error(f"Failed to download {filename}")
             return False
     
-    # Make dnstt-client executable
-    os.chmod('/etc/slowdns/dnstt-client', 0o755)
+    # Make dnstt-server executable - CHANGED from dnstt-client
+    os.chmod('/etc/slowdns/dnstt-server', 0o755)
     print_success("File permissions set")
     
     return True
@@ -167,13 +168,14 @@ def create_slowdns_service(nameserver):
     """Create systemd service for SlowDNS."""
     print_warning("Creating SlowDNS service...")
     
+    # CHANGED from dnstt-client to dnstt-server in ExecStart
     service_content = f"""[Unit]
-Description=SlowDNS Server (dnstt-client)
+Description=SlowDNS Server (dnstt-server)
 After=network.target sshd.service
 
 [Service]
 Type=simple
-ExecStart=/etc/slowdns/dnstt-client -udp :{SLOWDNS_PORT} -mtu {INTERNAL_EDNS_SIZE} -privkey-file /etc/slowdns/server.key {nameserver} 127.0.0.1:{SSHD_PORT}
+ExecStart=/etc/slowdns/dnstt-server -udp :{SLOWDNS_PORT} -mtu {INTERNAL_EDNS_SIZE} -privkey-file /etc/slowdns/server.key {nameserver} 127.0.0.1:{SSHD_PORT}
 Restart=always
 RestartSec=5
 User=root
@@ -264,8 +266,8 @@ def start_slowdns(nameserver):
     """Start SlowDNS service."""
     print_warning("Starting SlowDNS service...")
     
-    # Kill any existing process
-    run_cmd("pkill dnstt-client 2>/dev/null")
+    # Kill any existing process - CHANGED from dnstt-client
+    run_cmd("pkill dnstt-server 2>/dev/null")
     
     # Reload systemd
     run_cmd("systemctl daemon-reload")
@@ -295,13 +297,13 @@ def start_slowdns(nameserver):
     else:
         print_error("SlowDNS service failed to start")
         
-        # Try direct start
+        # Try direct start - CHANGED from dnstt-client
         print_warning("Trying direct start...")
-        cmd = f"/etc/slowdns/dnstt-client -udp :{SLOWDNS_PORT} -mtu {INTERNAL_EDNS_SIZE} -privkey-file /etc/slowdns/server.key {nameserver} 127.0.0.1:{SSHD_PORT} &"
+        cmd = f"/etc/slowdns/dnstt-server -udp :{SLOWDNS_PORT} -mtu {INTERNAL_EDNS_SIZE} -privkey-file /etc/slowdns/server.key {nameserver} 127.0.0.1:{SSHD_PORT} &"
         run_cmd(cmd)
         time.sleep(2)
         
-        success, output = run_cmd("pgrep dnstt-client", capture=True)
+        success, output = run_cmd("pgrep dnstt-server", capture=True)
         if success and output:
             print_success("SlowDNS started directly")
             return True
