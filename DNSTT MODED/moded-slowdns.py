@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FULL SLOWDNS + EDNS PROXY STACK
+FULL SLOWDNS + EDNS PROXY STACK - Debian 10 Compatible
 - OpenSSH (auto-install if missing)
 - SlowDNS server
 - High-QPS EDNS Proxy (SO_REUSEPORT + anti-abuse)
@@ -8,7 +8,13 @@ FULL SLOWDNS + EDNS PROXY STACK
 - Firewall
 """
 
-import os, subprocess, sys, time, socket, selectors, struct
+import os
+import subprocess
+import sys
+import time
+import socket
+import selectors
+import struct
 from pathlib import Path
 from collections import defaultdict
 
@@ -26,26 +32,58 @@ EDNS_PROXY_PATH = f"{INSTALL_DIR}/edns_proxy.py"
 SLOWDNS_DIR = "/etc/slowdns"
 SLOWDNS_BIN = f"{SLOWDNS_DIR}/sldns-server"
 
-SERVER_KEY_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT MODED/server.key"
-SERVER_PUB_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT MODED/server.pub"
-SERVER_BIN_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT MODED/dnstt-server"
+# URLs for GitHub resources
+SERVER_KEY_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key"
+SERVER_PUB_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub"
+SERVER_BIN_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server"
 
 # ================= UTIL =================
-def run(cmd, check=True):
-    subprocess.run(cmd, shell=True, check=check)
+def run(cmd, check=True, verbose=False):
+    """Run shell command with error handling"""
+    if verbose:
+        print(f"Running: {cmd}")
+    result = subprocess.run(cmd, shell=True, check=False, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        print(f"Error running: {cmd}")
+        print(f"Error: {result.stderr}")
+        # Don't exit for non-critical commands
+    if verbose:
+        print(f"Output: {result.stdout}")
+    return result
 
 def root_check():
+    """Check if running as root"""
     if os.geteuid() != 0:
-        print("Run as root")
+        print("This script must be run as root")
         sys.exit(1)
 
 def service_exists(name):
-    result = subprocess.run(f"systemctl list-units --type=service | grep -q {name}", shell=True)
+    """Check if a systemd service exists"""
+    result = subprocess.run(f"systemctl list-unit-files | grep -q '^{name}.service'", shell=True)
     return result.returncode == 0
 
+def fix_apt_sources():
+    """Fix Debian 10 buster repositories"""
+    print("[+] Fixing Debian 10 repositories")
+    # Update sources.list for archive.debian.org
+    sources_file = "/etc/apt/sources.list"
+    if os.path.exists(sources_file):
+        with open(sources_file, 'r') as f:
+            content = f.read()
+        
+        # Replace deb.debian.org with archive.debian.org for buster
+        new_content = content.replace('deb.debian.org/debian', 'archive.debian.org/debian')
+        new_content = new_content.replace('security.debian.org/debian-security', 'archive.debian.org/debian-security')
+        
+        # Write back only if changes were made
+        if new_content != content:
+            with open(sources_file, 'w') as f:
+                f.write(new_content)
+            print("  Updated sources.list")
+    run("apt-get update -qq", check=False, verbose=True)
+
 # ================= EDNS PROXY CODE =================
-EDNS_PROXY_CODE = r'''
-#!/usr/bin/env python3
+EDNS_PROXY_CODE = '''#!/usr/bin/env python3
 import socket, selectors, struct, time, os
 from collections import defaultdict
 
@@ -134,89 +172,286 @@ while True:
 # ================= MAIN =================
 def main():
     root_check()
+    
+    print("="*50)
+    print("FULL SLOWDNS + EDNS PROXY STACK INSTALLER")
+    print("Compatible with Debian 10 (buster)")
+    print("="*50)
 
     print("[+] Preparing system")
-    run("apt-get update -qq", False)
-    run("apt-get install -y openssh-server wget iptables", False)
-    run("systemctl stop ufw || true", False)
-    run("systemctl disable ufw || true", False)
-    run("systemctl stop systemd-resolved || true", False)
-    run("systemctl disable systemd-resolved || true", False)
+    fix_apt_sources()
+    
+    # Install packages with error handling
+    print("  Installing required packages...")
+    result = run("apt-get install -y openssh-server wget iptables iptables-persistent", check=False, verbose=True)
+    if result.returncode != 0:
+        print("  Warning: Some packages may have failed to install")
+    
+    # Handle ufw gracefully - might not exist on minimal install
+    print("  Disabling firewall services...")
+    run("systemctl stop ufw 2>/dev/null || true", check=False)
+    run("systemctl disable ufw 2>/dev/null || true", check=False)
+    
+    # Handle systemd-resolved gracefully
+    run("systemctl stop systemd-resolved 2>/dev/null || true", check=False)
+    run("systemctl disable systemd-resolved 2>/dev/null || true", check=False)
 
-    Path("/etc/resolv.conf").unlink(missing_ok=True)
-    Path("/etc/resolv.conf").write_text("nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
+    # Fix for Python 3.7 compatibility - replace missing_ok=True
+    print("  Configuring DNS resolver...")
+    try:
+        Path("/etc/resolv.conf").unlink()
+    except FileNotFoundError:
+        pass  # File doesn't exist, which is fine
+    except Exception as e:
+        print(f"  Warning: Could not unlink /etc/resolv.conf: {e}")
+    
+    # Create new resolv.conf
+    try:
+        with open("/etc/resolv.conf", "w") as f:
+            f.write("nameserver 8.8.8.8\nnameserver 8.8.4.4\n")
+        print("  Created /etc/resolv.conf")
+    except Exception as e:
+        print(f"  Error creating /etc/resolv.conf: {e}")
 
     print("[+] Kernel tuning")
-    run("sysctl -w net.core.rmem_max=134217728")
-    run("sysctl -w net.core.wmem_max=134217728")
-    run("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+    # Apply sysctl settings
+    sysctl_settings = {
+        "net.core.rmem_max": "134217728",
+        "net.core.wmem_max": "134217728",
+        "net.ipv6.conf.all.disable_ipv6": "1"
+    }
+    
+    for key, value in sysctl_settings.items():
+        cmd = f"sysctl -w {key}={value}"
+        result = run(cmd, check=False)
+        if result.returncode == 0:
+            print(f"  Set {key} = {value}")
+        else:
+            print(f"  Warning: Failed to set {key}")
 
     print("[+] Configuring SSH")
     ssh_service = "ssh"
-    Path("/etc/ssh/sshd_config").write_text(f"""
-Port {SSHD_PORT}
+    
+    # Backup original SSH config if it exists
+    ssh_config = "/etc/ssh/sshd_config"
+    if os.path.exists(ssh_config):
+        run(f"cp {ssh_config} {ssh_config}.backup", check=False)
+        print("  Backed up original SSH config")
+    
+    # Write new SSH config
+    try:
+        with open(ssh_config, "w") as f:
+            f.write(f"""Port {SSHD_PORT}
 PermitRootLogin yes
 PasswordAuthentication yes
 UseDNS no
 """)
-    if service_exists(ssh_service):
-        run(f"systemctl restart {ssh_service}")
-    else:
-        print(f"[!] SSH service '{ssh_service}' not found, skipping restart")
+        print("  Updated SSH configuration")
+        
+        # Restart SSH if service exists
+        if service_exists(ssh_service):
+            print("  Restarting SSH service...")
+            run(f"systemctl restart {ssh_service}", check=False, verbose=True)
+        else:
+            print(f"  Warning: SSH service '{ssh_service}' not found")
+    except Exception as e:
+        print(f"  Error configuring SSH: {e}")
 
     print("[+] Installing SlowDNS")
-    Path(SLOWDNS_DIR).mkdir(parents=True, exist_ok=True)
-    run(f"wget -q -O {SLOWDNS_DIR}/server.key {SERVER_KEY_URL}")
-    run(f"wget -q -O {SLOWDNS_DIR}/server.pub {SERVER_PUB_URL}")
-    run(f"wget -q -O {SLOWDNS_BIN} {SERVER_BIN_URL}")
-    run(f"chmod +x {SLOWDNS_BIN}")
-
-    nameserver = input("Enter DNS hostname (e.g dns.example.com): ").strip()
-
-    Path("/etc/systemd/system/server-sldns.service").write_text(f"""
-[Unit]
+    # Create directory
+    try:
+        Path(SLOWDNS_DIR).mkdir(parents=True, exist_ok=True)
+        print(f"  Created directory: {SLOWDNS_DIR}")
+    except Exception as e:
+        print(f"  Error creating directory: {e}")
+        return
+    
+    # Download files
+    print("  Downloading SlowDNS files...")
+    files_to_download = [
+        (SERVER_KEY_URL, f"{SLOWDNS_DIR}/server.key"),
+        (SERVER_PUB_URL, f"{SLOWDNS_DIR}/server.pub"),
+        (SERVER_BIN_URL, SLOWDNS_BIN)
+    ]
+    
+    for url, dest in files_to_download:
+        result = run(f"wget -q -O '{dest}' '{url}'", check=False)
+        if result.returncode == 0:
+            print(f"    Downloaded: {dest}")
+        else:
+            print(f"    Error downloading {url}")
+            # Try curl as fallback
+            run(f"curl -s -o '{dest}' '{url}'", check=False, verbose=False)
+    
+    # Make binary executable
+    if os.path.exists(SLOWDNS_BIN):
+        run(f"chmod +x {SLOWDNS_BIN}", check=False)
+        print(f"  Made {SLOWDNS_BIN} executable")
+    else:
+        print(f"  Warning: {SLOWDNS_BIN} not found after download")
+    
+    # Get nameserver from user
+    nameserver = input("Enter DNS hostname (e.g., dns.example.com): ").strip()
+    if not nameserver:
+        print("  Error: DNS hostname is required")
+        return
+    
+    print("[+] Creating systemd service for SlowDNS")
+    service_content = f"""[Unit]
+Description=SlowDNS Server
 After=network.target {ssh_service}.service
 [Service]
+Type=simple
+WorkingDirectory={SLOWDNS_DIR}
 ExecStart={SLOWDNS_BIN} -udp :{SLOWDNS_PORT} -mtu 1232 -privkey-file {SLOWDNS_DIR}/server.key {nameserver} 127.0.0.1:{SSHD_PORT}
 Restart=always
+RestartSec=5
 [Install]
 WantedBy=multi-user.target
-""")
+"""
+    
+    try:
+        with open("/etc/systemd/system/server-sldns.service", "w") as f:
+            f.write(service_content)
+        print("  Created SlowDNS service file")
+    except Exception as e:
+        print(f"  Error creating service file: {e}")
 
     print("[+] Installing EDNS Proxy")
-    Path(INSTALL_DIR).mkdir(parents=True, exist_ok=True)
-    Path(EDNS_PROXY_PATH).write_text(EDNS_PROXY_CODE)
-    run(f"chmod +x {EDNS_PROXY_PATH}")
-
-    Path("/etc/systemd/system/edns-proxy@.service").write_text(f"""
-[Unit]
+    try:
+        Path(INSTALL_DIR).mkdir(parents=True, exist_ok=True)
+        print(f"  Created directory: {INSTALL_DIR}")
+    except Exception as e:
+        print(f"  Error creating directory: {e}")
+    
+    # Write EDNS proxy code
+    try:
+        with open(EDNS_PROXY_PATH, "w") as f:
+            f.write(EDNS_PROXY_CODE)
+        run(f"chmod +x {EDNS_PROXY_PATH}", check=False)
+        print(f"  Created EDNS proxy at {EDNS_PROXY_PATH}")
+    except Exception as e:
+        print(f"  Error creating EDNS proxy: {e}")
+    
+    # Create EDNS proxy service template
+    proxy_service_content = f"""[Unit]
 After=network.target
 [Service]
+Type=simple
 ExecStart=/usr/bin/python3 {EDNS_PROXY_PATH}
 Restart=always
+RestartSec=5
 LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
-""")
+"""
+    
+    try:
+        with open("/etc/systemd/system/edns-proxy@.service", "w") as f:
+            f.write(proxy_service_content)
+        print("  Created EDNS proxy service template")
+    except Exception as e:
+        print(f"  Error creating proxy service: {e}")
 
-    print("[+] Firewall")
-    run("iptables -F")
-    run(f"iptables -A INPUT -p udp --dport {EDNS_LISTEN_PORT} -j ACCEPT")
-    run(f"iptables -A INPUT -p udp --dport {SLOWDNS_PORT} -j ACCEPT")
-    run(f"iptables -A INPUT -p tcp --dport {SSHD_PORT} -j ACCEPT")
+    print("[+] Configuring firewall")
+    # Clear existing rules
+    run("iptables -F", check=False)
+    run("iptables -t nat -F", check=False)
+    
+    # Add new rules
+    firewall_rules = [
+        f"iptables -A INPUT -p udp --dport {EDNS_LISTEN_PORT} -j ACCEPT",
+        f"iptables -A INPUT -p udp --dport {SLOWDNS_PORT} -j ACCEPT",
+        f"iptables -A INPUT -p tcp --dport {SSHD_PORT} -j ACCEPT",
+        "iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
+        "iptables -A INPUT -i lo -j ACCEPT",
+        "iptables -A INPUT -j DROP"
+    ]
+    
+    for rule in firewall_rules:
+        result = run(rule, check=False)
+        if result.returncode == 0:
+            print(f"  Added rule: {rule}")
+        else:
+            print(f"  Warning: Failed to add rule: {rule}")
+    
+    # Save iptables rules
+    print("  Saving iptables rules...")
+    run("iptables-save > /etc/iptables/rules.v4", check=False)
+    run("ip6tables-save > /etc/iptables/rules.v6", check=False)
 
     print("[+] Enabling services")
-    run("systemctl daemon-reload")
-    run("systemctl enable server-sldns")
-    run("systemctl start server-sldns")
-
+    run("systemctl daemon-reload", check=False)
+    
+    # Enable and start SlowDNS
+    result = run("systemctl enable server-sldns", check=False)
+    if result.returncode == 0:
+        print("  Enabled SlowDNS service")
+    else:
+        print("  Warning: Failed to enable SlowDNS service")
+    
+    result = run("systemctl start server-sldns", check=False, verbose=True)
+    if result.returncode == 0:
+        print("  Started SlowDNS service")
+    else:
+        print("  Warning: Failed to start SlowDNS service")
+        print(f"  Error: {result.stderr}")
+    
+    # Enable and start EDNS proxy workers
+    print(f"  Starting {WORKERS} EDNS proxy worker(s)...")
     for i in range(1, WORKERS + 1):
-        run(f"systemctl enable --now edns-proxy@{i}")
+        result = run(f"systemctl enable --now edns-proxy@{i}", check=False)
+        if result.returncode == 0:
+            print(f"    Started worker {i}/{WORKERS}")
+        else:
+            print(f"    Warning: Failed to start worker {i}")
 
-    print("\n✅ FULL STACK READY")
-    print(f"SSH      : {SSHD_PORT}")
-    print(f"SlowDNS  : {SLOWDNS_PORT}")
-    print(f"DNS Port : {EDNS_LISTEN_PORT} (EDNS Proxy)")
+    print("\n" + "="*50)
+    print("✅ FULL STACK READY")
+    print("="*50)
+    print(f"SSH Port       : {SSHD_PORT}")
+    print(f"SlowDNS Port   : {SLOWDNS_PORT}")
+    print(f"DNS Proxy Port : {EDNS_LISTEN_PORT}")
+    print(f"Workers        : {WORKERS}")
+    print(f"SlowDNS Binary : {SLOWDNS_BIN}")
+    print(f"Nameserver     : {nameserver}")
+    print("\n" + "="*50)
+    print("Post-installation checks:")
+    print("="*50)
+    
+    # Check if services are running
+    print("\nChecking services:")
+    services_to_check = ["server-sldns"]
+    for i in range(1, WORKERS + 1):
+        services_to_check.append(f"edns-proxy@{i}")
+    
+    for service in services_to_check:
+        result = run(f"systemctl is-active {service}", check=False)
+        if result.returncode == 0:
+            print(f"  ✓ {service} is running")
+        else:
+            print(f"  ✗ {service} is NOT running")
+    
+    # Check firewall rules
+    print("\nChecking firewall rules:")
+    result = run("iptables -L INPUT -n | grep -E '(ACCEPT|DROP)'", check=False)
+    if result.returncode == 0 and result.stdout:
+        print("  Firewall rules are configured")
+    
+    # Check if ports are listening
+    print("\nChecking listening ports:")
+    ports_to_check = [SSHD_PORT, SLOWDNS_PORT, EDNS_LISTEN_PORT]
+    for port in ports_to_check:
+        result = run(f"ss -tuln | grep :{port}", check=False)
+        if result.returncode == 0:
+            print(f"  ✓ Port {port} is listening")
+        else:
+            print(f"  ✗ Port {port} is NOT listening")
+    
+    print("\n" + "="*50)
+    print("IMPORTANT: If you're on Debian 10, consider upgrading to a")
+    print("supported version for security updates.")
+    print("="*50)
 
 if __name__ == "__main__":
     main()
