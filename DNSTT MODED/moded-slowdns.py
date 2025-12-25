@@ -27,7 +27,7 @@ SLOWDNS_DIR = "/etc/slowdns"
 SLOWDNS_BIN = f"{SLOWDNS_DIR}/sldns-server"
 
 SERVER_KEY_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT MODED/server.key"
-SERVER_PUB_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT/server.pub"
+SERVER_PUB_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT MODED/server.pub"
 SERVER_BIN_URL = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT MODED/dnstt-server"
 
 # ================= UTIL =================
