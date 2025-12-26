@@ -64,11 +64,10 @@ print_warning() {
 # System Functions
 # ============================================================================
 get_vps_ip() {
-    local ip=""
-    ip=$(curl -s --max-time 3 https://ifconfig.me 2>/dev/null)
-    [ -z "$ip" ] && ip=$(curl -s --max-time 3 https://api.ipify.org 2>/dev/null)
-    [ -z "$ip" ] && ip=$(curl -s --max-time 3 https://checkip.amazonaws.com 2>/dev/null)
+    ip=$(curl -4 -s https://api.ipify.org)
+    ip=$(echo "$ip" | tr -dc '0-9.')
     echo "$ip"
+}
 }
 
 fetch_from_github() {
