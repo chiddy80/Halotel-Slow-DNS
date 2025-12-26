@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# ===================== SMART SELF-DESTRUCT LICENSE SYSTEM =====================
+# ===================== SMART LICENSE SYSTEM =====================
 # Checks IP against allowed list + validates license key from GitHub
-# Wrong attempts trigger self-destruction
 # ==========================================================
 
 # GitHub Raw URLs
@@ -10,48 +9,32 @@ GITHUB_BASE="https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DN
 VALID_KEYS_URL="$GITHUB_BASE/Valid_Keys.txt"
 ALLOWED_IPS_URL="$GITHUB_BASE/Allowips.text"
 
-# Self-destruct settings
 MAX_ATTEMPTS=3
-SELF_DESTRUCT_FILE="/tmp/.self_destruct_triggered"
 LOG_FILE="/var/log/sldns_license.log"
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Create log file
-mkdir -p /var/log
-touch "$LOG_FILE"
-
-# Function to log events
-log_event() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
-}
+mkdir -p /var/log 2>/dev/null
+touch "$LOG_FILE" 2>/dev/null
 
 # Function to get current VPS public IP
 get_vps_ip() {
-    # Try multiple services
     local ip=""
     
-    # Method 1: ifconfig.me
-    ip=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null)
+    # Try multiple services
+    ip=$(curl -s --max-time 3 https://ifconfig.me 2>/dev/null)
     
-    # Method 2: ipify
     if [ -z "$ip" ] || [[ ! $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        ip=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)
+        ip=$(curl -s --max-time 3 https://api.ipify.org 2>/dev/null)
     fi
     
-    # Method 3: Amazon AWS
     if [ -z "$ip" ] || [[ ! $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        ip=$(curl -s --max-time 5 https://checkip.amazonaws.com 2>/dev/null)
-    fi
-    
-    # Method 4: Google DNS (most reliable)
-    if [ -z "$ip" ] || [[ ! $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        ip=$(dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null)
+        ip=$(curl -s --max-time 3 https://checkip.amazonaws.com 2>/dev/null)
     fi
     
     echo "$ip"
@@ -60,16 +43,11 @@ get_vps_ip() {
 # Function to fetch from GitHub
 fetch_from_github() {
     local url="$1"
-    local max_retries=2
-    
-    for i in $(seq 1 $max_retries); do
-        local content=$(curl -s -H "Cache-Control: no-cache" "$url" 2>/dev/null)
-        if [ -n "$content" ]; then
-            echo "$content"
-            return 0
-        fi
-        sleep 1
-    done
+    local content=$(curl -s --max-time 5 "$url" 2>/dev/null)
+    if [ -n "$content" ]; then
+        echo "$content"
+        return 0
+    fi
     return 1
 }
 
@@ -79,28 +57,18 @@ check_ip_allowed() {
     local allowed_ips=$(fetch_from_github "$ALLOWED_IPS_URL")
     
     if [ $? -ne 0 ]; then
-        echo -e "${RED}[✗] Cannot fetch allowed IPs list${NC}"
-        echo -e "${RED}[✗] Network error or GitHub issue${NC}"
+        echo -e "${RED}Error: Cannot fetch allowed IPs list${NC}"
         return 2
     fi
     
-    # Clean the list (remove comments, empty lines, trim spaces)
+    # Clean the list
     local clean_list=$(echo "$allowed_ips" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
     if echo "$clean_list" | grep -q "^$current_ip$"; then
-        echo -e "${GREEN}[✓] IP $current_ip is in allowed list${NC}"
-        log_event "IP_ALLOWED: $current_ip found in allowed list"
         return 0
     else
-        echo -e "${RED}[✗] IP $current_ip is NOT in allowed list${NC}"
-        echo -e "${RED}[✗] This VPS is not authorized${NC}"
-        log_event "IP_DENIED: $current_ip not in allowed list"
-        
-        # Show allowed IPs for reference
-        echo -e "\n${YELLOW}Allowed IPs on GitHub:${NC}"
-        echo "$clean_list" | while read ip; do
-            echo "  $ip"
-        done
+        echo -e "${RED}Error: VPS IP not authorized${NC}"
+        echo -e "${YELLOW}Get license: t.me/esimfreegb${NC}"
         return 1
     fi
 }
@@ -111,7 +79,7 @@ validate_license_key() {
     local valid_keys=$(fetch_from_github "$VALID_KEYS_URL")
     
     if [ $? -ne 0 ]; then
-        echo -e "${RED}[✗] Cannot fetch license keys${NC}"
+        echo -e "${RED}Error: Cannot fetch license keys${NC}"
         return 2
     fi
     
@@ -119,75 +87,16 @@ validate_license_key() {
     local clean_keys=$(echo "$valid_keys" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
     if echo "$clean_keys" | grep -q "^$license_key$"; then
-        echo -e "${GREEN}[✓] License key VALID${NC}"
-        log_event "LICENSE_VALID: Key $license_key accepted"
         return 0
     else
-        echo -e "${RED}[✗] License key INVALID${NC}"
-        log_event "LICENSE_INVALID: Key $license_key rejected"
+        echo -e "${RED}Error: Invalid license key${NC}"
         return 1
     fi
 }
 
-# Function to track failed attempts
-track_failed_attempt() {
-    local attempt_file="/tmp/.license_attempts_$1"
-    
-    if [ -f "$attempt_file" ]; then
-        local attempts=$(cat "$attempt_file")
-        attempts=$((attempts + 1))
-    else
-        local attempts=1
-    fi
-    
-    echo "$attempts" > "$attempt_file"
-    echo "$attempts"
-}
-
-# Function to self-destruct
-self_destruct() {
-    echo -e "${RED}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║                    SELF-DESTRUCTING                      ║${NC}"
-    echo -e "${RED}║           UNAUTHORIZED ACCESS DETECTED                   ║${NC}"
-    echo -e "${RED}╚══════════════════════════════════════════════════════════╝${NC}"
-    
-    # Create self-destruct trigger
-    touch "$SELF_DESTRUCT_FILE"
-    
-    # Log the event
-    log_event "SELF_DESTRUCT_TRIGGERED: Unauthorized access attempts exceeded"
-    
-    # Corrupt important files
-    echo "CORRUPTED BY UNAUTHORIZED ACCESS" > /etc/passwd.bak
-    echo "CORRUPTED BY UNAUTHORIZED ACCESS" > /etc/shadow.bak
-    
-    # Remove installation files
-    rm -rf /etc/slowdns /usr/local/bin/dnstt-server 2>/dev/null
-    
-    # Kill services
-    systemctl stop server-sldns 2>/dev/null
-    systemctl stop edns-proxy 2>/dev/null
-    systemctl disable server-sldns 2>/dev/null
-    systemctl disable edns-proxy 2>/dev/null
-    
-    # Clear firewall rules
-    iptables -F 2>/dev/null
-    
-    # Display fake error
-    echo -e "\n${RED}[✗] SYSTEM CORRUPTED${NC}"
-    echo -e "${RED}[✗] Installation files damaged${NC}"
-    echo -e "${RED}[✗] Please contact support for recovery${NC}"
-    
-    # Sleep and exit
-    sleep 5
-    exit 99
-}
-
 # Function to read hidden input
 read_hidden() {
-    local prompt="$1"
     stty -echo
-    echo -n "$prompt"
     read value
     stty echo
     echo
@@ -198,53 +107,34 @@ read_hidden() {
 check_license_smart() {
     clear
     
-    # Check if self-destruct already triggered
-    if [ -f "$SELF_DESTRUCT_FILE" ]; then
-        echo -e "${RED}[✗] SYSTEM LOCKED - SELF-DESTRUCT ACTIVATED${NC}"
-        echo -e "${RED}[✗] Contact support for recovery${NC}"
-        exit 99
-    fi
-    
-    echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║              SMART LICENSE VERIFICATION                  ║${NC}"
-    echo -e "${CYAN}║           IP MATCH + GITHUB VALIDATION                   ║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo "==========================================="
+    echo "      SLOWDNS INSTALLATION"
+    echo "==========================================="
+    echo ""
     
     # Get current VPS IP
-    echo -e "\n${YELLOW}[1/3] Checking VPS IP authorization...${NC}"
+    echo -e "${YELLOW}Checking VPS authorization...${NC}"
     CURRENT_IP=$(get_vps_ip)
     
     if [ -z "$CURRENT_IP" ] || [[ ! $CURRENT_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo -e "${RED}[✗] Cannot determine VPS IP address${NC}"
-        echo -e "${RED}[✗] Check your internet connection${NC}"
+        echo -e "${RED}Error: Cannot get VPS IP${NC}"
         exit 1
     fi
     
-    echo -e "${GREEN}[✓] Your VPS IP: $CURRENT_IP${NC}"
+    echo -e "VPS IP: $CURRENT_IP"
     
     # Check if IP is allowed
     if ! check_ip_allowed "$CURRENT_IP"; then
-        echo -e "${RED}[✗] VPS IP not authorized to use this script${NC}"
-        echo -e "${RED}[✗] Add your VPS IP to GitHub Allowips.text${NC}"
-        echo -e "${RED}[✗] GitHub URL: $ALLOWED_IPS_URL${NC}"
-        
-        # Track failed attempt by IP
-        local attempts=$(track_failed_attempt "$CURRENT_IP")
-        log_event "IP_UNAUTHORIZED: $CURRENT_IP - Attempt $attempts"
-        
-        if [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
-            self_destruct
-        fi
-        
         exit 1
     fi
     
+    echo -e "${GREEN}✓ IP authorized${NC}"
+    echo ""
+    
     # IP is allowed, now check license
-    echo -e "\n${YELLOW}[2/3] License verification...${NC}"
-    echo -e "${CYAN}────────────────────────────────────────────${NC}"
-    echo -e "Get license from:"
-    echo -e "${GREEN}https://github.com/chiddy80/Halotel-Slow-DNS${NC}"
-    echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    echo -e "${YELLOW}License verification required${NC}"
+    echo "Get license: t.me/esimfreegb"
+    echo ""
     
     # Track attempts for this session
     local session_attempts=0
@@ -252,69 +142,44 @@ check_license_smart() {
     while [ $session_attempts -lt $MAX_ATTEMPTS ]; do
         session_attempts=$((session_attempts + 1))
         
-        echo -e "\n${YELLOW}Attempt $session_attempts of $MAX_ATTEMPTS${NC}"
-        
-        # Get license key (hidden input)
-        echo -e "${GREEN}Enter license key (input hidden):${NC}"
-        LICENSE_KEY=$(read_hidden "License: ")
+        echo -e "Attempt $session_attempts of $MAX_ATTEMPTS"
+        echo -n "Enter license key: "
+        LICENSE_KEY=$(read_hidden)
         
         if [ -z "$LICENSE_KEY" ]; then
-            echo -e "${RED}[✗] License key cannot be empty${NC}"
+            echo -e "${RED}Error: License key cannot be empty${NC}"
             continue
         fi
         
         # Clean the key
         LICENSE_KEY=$(echo "$LICENSE_KEY" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
         
-        echo -e "${YELLOW}Verifying license key...${NC}"
+        echo -e "Verifying..."
         
         # Validate against GitHub
         if validate_license_key "$LICENSE_KEY"; then
-            echo -e "\n${GREEN}══════════════════════════════════════════════════${NC}"
-            echo -e "${GREEN}[✓] DOUBLE VERIFICATION SUCCESSFUL${NC}"
-            echo -e "${GREEN}[✓] VPS IP: $CURRENT_IP (Authorized)${NC}"
-            echo -e "${GREEN}[✓] License Key: ${LICENSE_KEY:0:8}... (Valid)${NC}"
-            echo -e "${GREEN}[✓] Proceeding with installation...${NC}"
-            echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
-            
-            log_event "FULL_AUTHORIZATION: IP=$CURRENT_IP Key=${LICENSE_KEY:0:8}..."
-            
-            # Create success marker
-            echo "VALIDATED_AT: $(date)" > /tmp/.license_validated
-            echo "IP: $CURRENT_IP" >> /tmp/.license_validated
-            echo "KEY_PREFIX: ${LICENSE_KEY:0:8}" >> /tmp/.license_validated
-            
-            sleep 2
+            echo -e "${GREEN}✓ License verified${NC}"
+            echo -e "${GREEN}✓ Starting installation...${NC}"
+            sleep 1
             return 0
         else
-            echo -e "${RED}[✗] License key verification failed${NC}"
-            
-            # Log failed attempt
-            log_event "LICENSE_FAILED: IP=$CURRENT_IP Attempt=$session_attempts"
-            
             if [ $session_attempts -lt $MAX_ATTEMPTS ]; then
-                echo -e "${YELLOW}Try again. ${RED}WARNING: ${YELLOW}Wrong attempts trigger self-destruct${NC}"
-                sleep 1
+                echo -e "${YELLOW}Try again${NC}"
+                echo ""
             else
-                echo -e "${RED}[✗] MAXIMUM ATTEMPTS REACHED${NC}"
-                echo -e "${RED}[✗] SELF-DESTRUCT SEQUENCE INITIATED${NC}"
-                
-                log_event "MAX_ATTEMPTS_REACHED: IP=$CURRENT_IP - Triggering self-destruct"
-                
-                # Trigger self-destruct
-                self_destruct
+                echo -e "${RED}Error: Max attempts reached${NC}"
+                echo -e "${RED}Contact: t.me/esimfreegb${NC}"
+                exit 1
             fi
         fi
     done
     
-    # Should not reach here
     exit 1
 }
 
 # ===================== MAIN LICENSE CHECK =====================
-# Check if running as root
 if [ "$EUID" -ne 0 ]; then
-    echo "[✗] Please run this script as root"
+    echo "Error: Run as root"
     exit 1
 fi
 
@@ -325,9 +190,9 @@ check_license_smart
 # MAIN INSTALLATION SCRIPT STARTS HERE
 # ==========================================================
 
-# Ensure running as root (double check)
+# Ensure running as root
 if [ "$EUID" -ne 0 ]; then
-    echo "[✗] Please run this script as root"
+    echo "Error: Run as root"
     exit 1
 fi
 
