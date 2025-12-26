@@ -4,13 +4,20 @@
 #                     SLOWDNS PROFESSIONAL INSTALLER
 # ============================================================================
 
-#!/bin/bash
-
 # Configuration
 KEY_FILE="/etc/halotel/keys.txt"
 IP_FILE="/etc/halotel/ips.txt"
 MAX_ATTEMPTS=3
 LOG_FILE="/var/log/slowdns.log"
+
+# --- Ensure secure permissions ---
+if [ -f "$KEY_FILE" ]; then
+  chmod 600 "$KEY_FILE"
+fi
+
+if [ -f "$IP_FILE" ]; then
+  chmod 600 "$IP_FILE"
+fi
 
 # --- Server authorization ---
 MYIP=$(curl -s ifconfig.me)
@@ -29,7 +36,6 @@ if ! grep -q "$MYIP" "$IP_FILE"; then
   echo "This server is not authorized"
   exit 1
 fi
-# --- End authorization ---
 
 # Colors
 RED='\033[0;31m'
