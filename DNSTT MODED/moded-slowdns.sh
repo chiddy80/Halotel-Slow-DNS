@@ -1,10 +1,9 @@
 #!/bin/bash
 set -e
 
-#############################################
-#  SlowDNS + dnsdist Production Installer
-#  Stable | High Performance | No Crashes
-#############################################
+##################################
+# SlowDNS + dnsdist (Debian 12+)
+##################################
 
 if [ "$EUID" -ne 0 ]; then
   echo "Run as root"
@@ -23,9 +22,9 @@ echo "Installing packages..."
 apt update -y
 apt install -y openssh-server curl wget dnsdist iptables
 
-#############################################
+##################################
 # SSH
-#############################################
+##################################
 cat > /etc/ssh/sshd_config << EOF
 Port $SSHD_PORT
 Protocol 2
@@ -40,9 +39,9 @@ EOF
 
 systemctl restart sshd
 
-#############################################
+##################################
 # SlowDNS
-#############################################
+##################################
 rm -rf /etc/slowdns
 mkdir -p /etc/slowdns
 cd /etc/slowdns
@@ -68,38 +67,40 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
-#############################################
-# Disable system DNS
-#############################################
+##################################
+# Free DNS port
+##################################
 systemctl stop systemd-resolved || true
 systemctl disable systemd-resolved || true
 fuser -k 53/udp || true
 fuser -k 53/tcp || true
 
-#############################################
-# dnsdist (DNS Edge Proxy)
-#############################################
+##################################
+# dnsdist (Debian 12 syntax)
+##################################
 cat > /etc/dnsdist/dnsdist.conf << 'EOF'
--- Bind public DNS port
 setLocal("0.0.0.0:53")
 
--- Backend = SlowDNS tunnel
-newServer({address="127.0.0.1:5300", name="slowdns", pool="slow"})
+newServer({address="127.0.0.1:5300", name="slowdns"})
 
--- Large buffers for Africa/Asia mobile networks
 setMaxUDPOutstanding(8192)
 setUDPSocketBuffer(8388608)
 
--- Allow up to ~50 active users per IP
-addAction(MaxQPSIPRule(50), DropAction())
+-- Allow ~50 active users per IP
+addAction(MaxQPSIPRule(50,5), DropAction())
 
--- Drop empty garbage packets
-addAction(QTypeRule(0), DropAction())
+-- Drop malformed packets
+addAction(NotRule(DNSHeaderRule()), DropAction())
+
+-- Fast cleanup of dead tunnels
+setTCPRecvTimeout(2)
+setTCPSendTimeout(2)
+setUDPTimeout(2)
 EOF
 
-#############################################
+##################################
 # Firewall
-#############################################
+##################################
 iptables -F
 iptables -P INPUT DROP
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
@@ -108,18 +109,18 @@ iptables -A INPUT -p udp --dport 53 -j ACCEPT
 iptables -A INPUT -p udp --dport $SLOWDNS_PORT -j ACCEPT
 iptables -A INPUT -p icmp -j ACCEPT
 
-#############################################
-# Start everything
-#############################################
+##################################
+# Start services
+##################################
 systemctl daemon-reload
 systemctl enable server-sldns dnsdist
 systemctl restart server-sldns
 sleep 2
 systemctl restart dnsdist
 
-#############################################
-# Show status
-#############################################
+##################################
+# Done
+##################################
 echo ""
 echo "=============================="
 echo "  SlowDNS + dnsdist ONLINE"
@@ -129,6 +130,6 @@ echo "DNS Port  : 53"
 echo "SlowDNS   : $SLOWDNS_PORT"
 echo "MTU       : 1200"
 echo ""
-echo "Test with:"
+echo "Test:"
 echo "dig @$SERVER_IP google.com"
 echo ""
