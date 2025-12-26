@@ -4,38 +4,49 @@
 #                     SLOWDNS PROFESSIONAL INSTALLER
 # ============================================================================
 
-# Configuration
+# =================== HARD LICENSE GATE ===================
+
 KEY_FILE="/etc/halotel/keys.txt"
 IP_FILE="/etc/halotel/ips.txt"
-MAX_ATTEMPTS=3
-LOG_FILE="/var/log/slowdns.log"
 
-# --- Ensure secure permissions ---
-if [ -f "$KEY_FILE" ]; then
-  chmod 600 "$KEY_FILE"
+# Lock permissions
+[ -f "$KEY_FILE" ] && chmod 600 "$KEY_FILE"
+[ -f "$IP_FILE" ] && chmod 600 "$IP_FILE"
+
+# Must exist
+if [ ! -f "$KEY_FILE" ] || [ ! -f "$IP_FILE" ]; then
+    echo "License system missing"
+    exit 1
 fi
 
-if [ -f "$IP_FILE" ]; then
-  chmod 600 "$IP_FILE"
+# Get VPS IP
+MYIP=$(curl -s ifconfig.me || curl -s ipinfo.io/ip)
+
+echo "[i] Checking VPS IP..."
+echo "VPS IP: $MYIP"
+echo "──────────────────────────────────────────"
+
+# Check IP
+if ! grep -Fxq "$MYIP" "$IP_FILE"; then
+    echo "[✗] VPS IP not authorized"
+    echo "[!] Contact admin to whitelist your IP"
+    echo "[!] Telegram: @esimfreegb"
+    exit 1
 fi
 
-# --- Server authorization ---
-MYIP=$(curl -s ifconfig.me)
+# Ask key
+read -p "Enter license key: " USERKEY
 
-if [ ! -f "$KEY_FILE" ]; then
-  echo "License file missing"
-  exit 1
+# Check key
+if ! grep -Fxq "$USERKEY" "$KEY_FILE"; then
+    echo "[✗] Invalid license key"
+    exit 1
 fi
 
-if [ ! -f "$IP_FILE" ]; then
-  echo "IP whitelist missing"
-  exit 1
-fi
+echo "[✓] License accepted"
+echo "──────────────────────────────────────────"
 
-if ! grep -q "$MYIP" "$IP_FILE"; then
-  echo "This server is not authorized"
-  exit 1
-fi
+# ================= END LICENSE GATE ======================
 
 # Colors
 RED='\033[0;31m'
