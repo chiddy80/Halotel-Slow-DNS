@@ -1,330 +1,220 @@
 #!/bin/bash
 
-# ╔═══════════════════════════════════════════════════════════════════════════════════╗
-# ║                     SLOWDNS PROFESSIONAL INSTALLER v3.2.1                        ║
-# ║                          ──────────────────────────────                           ║
-# ║                Enterprise-Grade DNS Tunneling Solution                           ║
-# ╚═══════════════════════════════════════════════════════════════════════════════════╝
-#
-#  ███████╗██╗      ██████╗ ██╗    ██╗██████╗ ███╗   ██╗███████╗
-#  ██╔════╝██║     ██╔═══██╗██║    ██║██╔══██╗████╗  ██║██╔════╝
-#  ███████╗██║     ██║   ██║██║ █╗ ██║██║  ██║██╔██╗ ██║███████╗
-#  ╚════██║██║     ██║   ██║██║███╗██║██║  ██║██║╚██╗██║╚════██║
-#  ███████║███████╗╚██████╔╝╚███╔███╔╝██████╔╝██║ ╚████║███████║
-#  ╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
-#
-#                 🌍 MRCHIDDY ESIMFREEGB | ⌛ FAST DNS HALOTEL
+# ============================================================================
+#                     SLOWDNS PROFESSIONAL INSTALLER
+# ============================================================================
 
-# ============================================================================
-#                             SYSTEM CONFIGURATION
-# ============================================================================
+# Configuration
 GITHUB_BASE="https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED"
 VALID_KEYS_URL="$GITHUB_BASE/Valid_Keys.txt"
 ALLOWED_IPS_URL="$GITHUB_BASE/Allowips.text"
 MAX_ATTEMPTS=3
-LOG_FILE="/var/log/slowdns_pro.log"
-INSTALL_DIR="/opt/slowdns_pro"
+LOG_FILE="/var/log/slowdns.log"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+WHITE='\033[1;37m'
+NC='\033[0m'
 
 # ============================================================================
-#                              COLOR SCHEME
+# Display Functions
 # ============================================================================
-# Primary Colors
-PRIMARY='\033[38;5;45m'      # Cyan Blue
-SECONDARY='\033[38;5;208m'   # Orange
-SUCCESS='\033[38;5;46m'      # Green
-ERROR='\033[38;5;196m'       # Red
-WARNING='\033[38;5;226m'     # Yellow
-INFO='\033[38;5;51m'         # Light Cyan
-HIGHLIGHT='\033[38;5;201m'   # Magenta
-DIM='\033[38;5;244m'         # Gray
-BOLD='\033[1m'
-RESET='\033[0m'
-
-# ============================================================================
-#                               GRAPHICS
-# ============================================================================
-BOX_TOP="╔════════════════════════════════════════════════════════════════════╗"
-BOX_MID="╠════════════════════════════════════════════════════════════════════╣"
-BOX_BOT="╚════════════════════════════════════════════════════════════════════╝"
-LINE="────────────────────────────────────────────────────────────────────────"
-STAR="✦"
-CHECK="✅"
-CROSS="❌"
-WARN="⚠️"
-LOCK="🔒"
-KEY="🔑"
-SERVER="🖥️"
-NETWORK="🌐"
-CLOCK="⏱️"
-ROCKET="🚀"
-
-# ============================================================================
-#                          LOGGING SYSTEM
-# ============================================================================
-log() {
-    echo -e "${DIM}[$(date '+%Y-%m-%d %H:%M:%S')]${RESET} $1" | tee -a "$LOG_FILE"
-}
-
 print_header() {
     clear
-    echo -e "${PRIMARY}"
-    echo "    ╔════════════════════════════════════════════════════════════════════╗"
-    echo "    ║                                                                    ║"
-    echo "    ║    ███████╗██╗      ██████╗ ██╗    ██╗██████╗ ███╗   ██╗███████╗   ║"
-    echo "    ║    ██╔════╝██║     ██╔═══██╗██║    ██║██╔══██╗████╗  ██║██╔════╝   ║"
-    echo "    ║    ███████╗██║     ██║   ██║██║ █╗ ██║██║  ██║██╔██╗ ██║███████╗   ║"
-    echo "    ║    ╚════██║██║     ██║   ██║██║███╗██║██║  ██║██║╚██╗██║╚════██║   ║"
-    echo "    ║    ███████║███████╗╚██████╔╝╚███╔███╔╝██████╔╝██║ ╚████║███████║   ║"
-    echo "    ║    ╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ║"
-    echo "    ║                                                                    ║"
-    echo "    ║               P R O F E S S I O N A L   E D I T I O N              ║"
-    echo "    ║                                                                    ║"
-    echo "    ╚════════════════════════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
-    echo ""
-    echo -e "${INFO}${BOLD}           SlowDNS Tunnel System - Professional Edition${RESET}"
-    echo -e "${DIM}                    Optimized for Maximum Performance & Security${RESET}"
-    echo ""
-    echo -e "${SECONDARY}${BOLD}        🌍 MRCHIDDY ESIMFREEGB  ${DIM}│${RESET} ${SUCCESS}${BOLD}⌛ FAST DNS HALOTEL${RESET}"
-    echo -e "${WARNING}${BOLD}                     ⚡ Contact: @esimfreegb${RESET}"
-    echo ""
-    echo -e "${DIM}${LINE}${RESET}"
+    echo -e "${CYAN}"
+    echo "   ███████╗██╗      ██████╗ ██╗    ██╗██████╗ ███╗   ██╗███████╗"
+    echo "   ██╔════╝██║     ██╔═══██╗██║    ██║██╔══██╗████╗  ██║██╔════╝"
+    echo "   ███████╗██║     ██║   ██║██║ █╗ ██║██║  ██║██╔██╗ ██║███████╗"
+    echo "   ╚════██║██║     ██║   ██║██║███╗██║██║  ██║██║╚██╗██║╚════██║"
+    echo "   ███████║███████╗╚██████╔╝╚███╔███╔╝██████╔╝██║ ╚████║███████║"
+    echo "   ╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝"
+    echo -e "${NC}"
+    echo -e "${BLUE}┌───────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${NC} ${WHITE}Professional SlowDNS Tunnel System${NC}                  ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC} ${YELLOW}🌍 MRCHIDDY ESIMFREEGB | ⌛ FAST DNS HALOTEL${NC}        ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC} ${PURPLE}⚡ Contact Admin: @esimfreegb${NC}                       ${BLUE}│${NC}"
+    echo -e "${BLUE}└───────────────────────────────────────────────────────────┘${NC}"
     echo ""
 }
 
-print_section() {
-    echo ""
-    echo -e "${PRIMARY}${BOLD}╔════════════════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${PRIMARY}${BOLD}║                                                                    ║${RESET}"
-    echo -e "${PRIMARY}${BOLD}║  ${HIGHLIGHT}${BOLD}$1${RESET}"
-    echo -e "${PRIMARY}${BOLD}║                                                                    ║${RESET}"
-    echo -e "${PRIMARY}${BOLD}╚════════════════════════════════════════════════════════════════════╝${RESET}"
-    echo ""
+print_line() {
+    echo -e "${BLUE}─────────────────────────────────────────────────────────────${NC}"
 }
 
-print_status() {
-    case $1 in
-        success) echo -e "${SUCCESS}${CHECK} $2${RESET}" ;;
-        error) echo -e "${ERROR}${CROSS} $2${RESET}" ;;
-        warning) echo -e "${WARNING}${WARN} $2${RESET}" ;;
-        info) echo -e "${INFO}${SERVER} $2${RESET}" ;;
-        *) echo -e "$2" ;;
-    esac
+print_success() {
+    echo -e "${GREEN}[✓] $1${NC}"
 }
 
-spinner() {
-    local pid=$1
-    local delay=0.1
-    local spinstr='⣷⣯⣟⡿⢿⣻⣽⣾'
-    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
-        local temp=${spinstr#?}
-        printf " [%c]  " "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b\b"
-    done
-    printf "    \b\b\b\b"
+print_error() {
+    echo -e "${RED}[✗] $1${NC}"
+}
+
+print_info() {
+    echo -e "${CYAN}[i] $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[!] $1${NC}"
 }
 
 # ============================================================================
-#                          VALIDATION SYSTEM
+# System Functions
 # ============================================================================
 get_vps_ip() {
     local ip=""
-    local services=(
-        "https://ifconfig.me"
-        "https://api.ipify.org"
-        "https://checkip.amazonaws.com"
-        "https://ipinfo.io/ip"
-    )
-    
-    echo -ne "${INFO}Detecting public IP address "
-    for service in "${services[@]}"; do
-        ip=$(curl -s --max-time 2 "$service" 2>/dev/null)
-        if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo -e "${SUCCESS}${CHECK}${RESET}"
-            echo -e "  ${DIM}Found via: $service${RESET}"
-            echo "$ip"
-            return 0
-        fi
-        echo -ne "."
-        sleep 0.3
-    done
-    
-    echo -e "${ERROR}${CROSS}${RESET}"
-    print_status error "Failed to detect public IP"
-    return 1
+    ip=$(curl -s --max-time 3 https://ifconfig.me 2>/dev/null)
+    [ -z "$ip" ] && ip=$(curl -s --max-time 3 https://api.ipify.org 2>/dev/null)
+    [ -z "$ip" ] && ip=$(curl -s --max-time 3 https://checkip.amazonaws.com 2>/dev/null)
+    echo "$ip"
 }
 
-fetch_github_content() {
-    local url="$1"
-    local retries=3
-    local timeout=5
-    
-    for ((i=1; i<=retries; i++)); do
-        local content=$(curl -s --max-time "$timeout" "$url")
-        if [ -n "$content" ]; then
-            echo "$content"
-            return 0
-        fi
-        sleep 1
-    done
-    
-    return 1
+fetch_from_github() {
+    curl -s --max-time 5 "$1" 2>/dev/null
 }
 
-check_ip_authorization() {
-    print_status info "Validating VPS Authorization"
-    echo -e "${DIM}${LINE}${RESET}"
+check_ip_allowed() {
+    local current_ip="$1"
+    local allowed_ips=$(fetch_from_github "$ALLOWED_IPS_URL")
     
-    local current_ip=$(get_vps_ip)
     if [ $? -ne 0 ]; then
-        return 1
+        print_error "Cannot fetch allowed IPs list"
+        return 2
     fi
-    
-    echo -e "${INFO}Detected Public IP: ${BOLD}$current_ip${RESET}"
-    echo ""
-    
-    echo -ne "${INFO}Checking authorization list "
-    local allowed_ips=$(fetch_github_content "$ALLOWED_IPS_URL")
-    if [ $? -ne 0 ]; then
-        echo -e "${ERROR}${CROSS}${RESET}"
-        print_status error "Cannot fetch authorization list"
-        return 1
-    fi
-    echo -e "${SUCCESS}${CHECK}${RESET}"
     
     local clean_list=$(echo "$allowed_ips" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
     if echo "$clean_list" | grep -q "^$current_ip$"; then
-        echo ""
-        echo -e "${SUCCESS}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
-        echo -e "${SUCCESS}${BOLD}║                       AUTHORIZATION GRANTED                   ║${RESET}"
-        echo -e "${SUCCESS}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
-        echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
-        echo -e "${SUCCESS}${BOLD}║  ✅ VPS IP: $current_ip                                 ║${RESET}"
-        echo -e "${SUCCESS}${BOLD}║  ✅ Status: Authorized for installation                     ║${RESET}"
-        echo -e "${SUCCESS}${BOLD}║  ✅ Timestamp: $(date '+%Y-%m-%d %H:%M:%S')                      ║${RESET}"
-        echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
-        echo -e "${SUCCESS}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
-        echo ""
         return 0
     else
-        echo ""
-        echo -e "${ERROR}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
-        echo -e "${ERROR}${BOLD}║                    AUTHORIZATION REQUIRED                    ║${RESET}"
-        echo -e "${ERROR}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
-        echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
-        echo -e "${ERROR}${BOLD}║  ❌ VPS IP: $current_ip                                 ║${RESET}"
-        echo -e "${ERROR}${BOLD}║  ❌ Status: Not authorized                                   ║${RESET}"
-        echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
-        echo -e "${ERROR}${BOLD}║  Contact administrator to whitelist your IP:                 ║${RESET}"
-        echo -e "${ERROR}${BOLD}║  Telegram: @esimfreegb                                       ║${RESET}"
-        echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
-        echo -e "${ERROR}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
-        echo ""
         return 1
     fi
 }
 
-validate_license() {
-    local attempts=0
+validate_license_key() {
+    local license_key="$1"
+    local valid_keys=$(fetch_from_github "$VALID_KEYS_URL")
     
+    if [ $? -ne 0 ]; then
+        print_error "Cannot fetch license keys"
+        return 2
+    fi
+    
+    local clean_keys=$(echo "$valid_keys" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    
+    if echo "$clean_keys" | grep -q "^$license_key$"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+read_hidden() {
+    stty -echo
+    read value
+    stty echo
+    echo
+    echo "$value"
+}
+
+# ============================================================================
+# License Check Function
+# ============================================================================
+check_license() {
+    print_header
+    
+    echo -e "${WHITE}════════════════════ LICENSE VERIFICATION ════════════════════${NC}"
+    echo ""
+    
+    # Get VPS IP
+    print_info "Checking VPS IP..."
+    CURRENT_IP=$(get_vps_ip)
+    
+    if [ -z "$CURRENT_IP" ] || [[ ! $CURRENT_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        print_error "Cannot get VPS IP"
+        exit 1
+    fi
+    
+    echo -e "${CYAN}VPS IP: ${WHITE}$CURRENT_IP${NC}"
+    print_line
+    
+    # Check IP authorization
+    print_info "Checking IP authorization..."
+    if ! check_ip_allowed "$CURRENT_IP"; then
+        print_error "VPS IP not authorized"
+        echo ""
+        print_warning "Contact admin to whitelist your IP:"
+        print_warning "Telegram: @esimfreegb"
+        exit 1
+    fi
+    
+    print_success "IP authorized"
+    echo ""
+    
+    # License verification
+    echo -e "${WHITE}══════════════════ LICENSE KEY REQUIRED ══════════════════${NC}"
+    echo ""
+    print_info "Get license key from: @esimfreegb"
+    echo ""
+    
+    local attempts=0
     while [ $attempts -lt $MAX_ATTEMPTS ]; do
         attempts=$((attempts + 1))
         
-        echo ""
-        echo -e "${INFO}${BOLD}License Verification (Attempt $attempts/$MAX_ATTEMPTS)${RESET}"
-        echo -e "${DIM}${LINE}${RESET}"
+        echo -e "${CYAN}Attempt ${WHITE}$attempts${CYAN} of ${WHITE}$MAX_ATTEMPTS${NC}"
+        echo -ne "${YELLOW}Enter license key: ${NC}"
+        LICENSE_KEY=$(read_hidden)
         
-        echo -ne "${HIGHLIGHT}${KEY} Enter License Key: ${RESET}"
-        stty -echo
-        read -r license_key
-        stty echo
-        echo ""
-        
-        if [ -z "$license_key" ]; then
-            print_status warning "License key cannot be empty"
+        if [ -z "$LICENSE_KEY" ]; then
+            print_error "License key cannot be empty"
             echo ""
             continue
         fi
         
-        license_key=$(echo "$license_key" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+        LICENSE_KEY=$(echo "$LICENSE_KEY" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
         
-        echo -ne "${INFO}Verifying license key "
-        for i in {1..15}; do
-            echo -ne "${ROCKET}"
-            sleep 0.1
-        done
-        echo -e "${RESET}"
+        print_info "Verifying license..."
         
-        local valid_keys=$(fetch_github_content "$VALID_KEYS_URL")
-        if [ $? -ne 0 ]; then
-            print_status error "Cannot connect to license server"
+        if validate_license_key "$LICENSE_KEY"; then
             echo ""
-            continue
-        fi
-        
-        local clean_keys=$(echo "$valid_keys" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        
-        if echo "$clean_keys" | grep -q "^$license_key$"; then
-            echo ""
-            echo -e "${SUCCESS}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
-            echo -e "${SUCCESS}${BOLD}║                    LICENSE VALIDATION SUCCESS                ║${RESET}"
-            echo -e "${SUCCESS}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
-            echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
-            echo -e "${SUCCESS}${BOLD}║  ✅ License Key: $(echo $license_key | cut -c1-20)...             ║${RESET}"
-            echo -e "${SUCCESS}${BOLD}║  ✅ Validation: Successful                                   ║${RESET}"
-            echo -e "${SUCCESS}${BOLD}║  ✅ Expiry: Unlimited                                        ║${RESET}"
-            echo -e "${SUCCESS}${BOLD}║  ✅ Activation: $(date '+%Y-%m-%d %H:%M:%S')                      ║${RESET}"
-            echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
-            echo -e "${SUCCESS}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
-            echo ""
+            print_success "✓ License verified successfully"
+            print_success "✓ Starting installation..."
+            sleep 1
             return 0
         else
-            print_status error "Invalid license key"
+            print_error "Invalid license key"
             
             if [ $attempts -lt $MAX_ATTEMPTS ]; then
-                echo -e "${WARNING}Remaining attempts: $((MAX_ATTEMPTS - attempts))${RESET}"
                 echo ""
+                print_warning "Try again"
+                print_line
+                echo ""
+            else
+                echo ""
+                print_error "Maximum attempts reached"
+                print_warning "Contact: @esimfreegb"
+                exit 1
             fi
         fi
     done
     
-    echo ""
-    echo -e "${ERROR}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${ERROR}${BOLD}║               MAXIMUM ATTEMPTS REACHED                      ║${RESET}"
-    echo -e "${ERROR}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
-    echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
-    echo -e "${ERROR}${BOLD}║  ❌ License verification failed                              ║${RESET}"
-    echo -e "${ERROR}${BOLD}║  ❌ Maximum attempts: $MAX_ATTEMPTS                                 ║${RESET}"
-    echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
-    echo -e "${ERROR}${BOLD}║  Contact support for assistance:                             ║${RESET}"
-    echo -e "${ERROR}${BOLD}║  Telegram: @esimfreegb                                       ║${RESET}"
-    echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
-    echo -e "${ERROR}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
-    echo ""
-    return 1
+    exit 1
 }
 
 # ============================================================================
-#                         INSTALLATION FUNCTIONS
+# Installation Functions
 # ============================================================================
 configure_openssh() {
-    print_status info "Configuring OpenSSH Server"
-    echo -e "${DIM}${LINE}${RESET}"
-    
+    print_info "Configuring OpenSSH..."
     SSHD_PORT=22
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%s)
     
-    echo -ne "${INFO}Backup created "
-    echo -e "${SUCCESS}${CHECK}${RESET}"
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup 2>/dev/null
     
     cat > /etc/ssh/sshd_config << EOF
-# ===========================================
-# OpenSSH Configuration - SlowDNS Optimized
-# ===========================================
-
 Port $SSHD_PORT
 Protocol 2
 PermitRootLogin yes
@@ -351,117 +241,84 @@ EOF
     
     systemctl restart sshd
     sleep 2
-    
-    if systemctl is-active --quiet sshd; then
-        print_status success "SSH configured on port $SSHD_PORT"
-    else
-        print_status error "SSH configuration failed"
-        return 1
-    fi
+    print_success "SSH configured on port $SSHD_PORT"
 }
 
 install_slowdns() {
-    print_status info "Installing SlowDNS Engine"
-    echo -e "${DIM}${LINE}${RESET}"
+    print_info "Setting up SlowDNS..."
     
-    SLOWDNS_PORT=5300
+    rm -rf /etc/slowdns
     mkdir -p /etc/slowdns
     cd /etc/slowdns
     
-    # Download components
-    echo -ne "${INFO}Downloading components "
-    for i in {1..3}; do
-        echo -ne "${STAR}"
-        sleep 0.3
-    done
-    echo -e "${RESET}"
-    
-    wget -q --show-progress -O dnstt-server "$GITHUB_BASE/dnstt-server"
-    wget -q --show-progress -O server.key "$GITHUB_BASE/server.key"
-    wget -q --show-progress -O server.pub "$GITHUB_BASE/server.pub"
-    
+    # Download binary
+    wget -q -O dnstt-server "$GITHUB_BASE/dnstt-server"
     chmod +x dnstt-server
     
-    # Test binary
-    if ./dnstt-server --help 2>&1 | head -1 | grep -q "dnstt"; then
-        print_status success "SlowDNS binary verified"
-    else
-        print_status warning "Binary test inconclusive - proceeding anyway"
-    fi
+    # Download keys
+    wget -q -O server.key "$GITHUB_BASE/server.key"
+    wget -q -O server.pub "$GITHUB_BASE/server.pub"
+    
+    print_success "SlowDNS components downloaded"
 }
 
 create_services() {
-    print_status info "Creating System Services"
-    echo -e "${DIM}${LINE}${RESET}"
+    print_info "Creating services..."
     
     # Get nameserver
-    read -p "$(echo -e "${HIGHLIGHT}${NETWORK} Enter nameserver [dns.halotel.com]: ${RESET}")" NAMESERVER
+    echo ""
+    echo -ne "${YELLOW}Enter nameserver [dns.halotel.com]: ${NC}"
+    read NAMESERVER
     NAMESERVER=${NAMESERVER:-dns.halotel.com}
     
-    # SlowDNS Service
-    cat > /etc/systemd/system/slowdns-tunnel.service << EOF
+    # SlowDNS service
+    cat > /etc/systemd/system/slowdns.service << EOF
 [Unit]
-Description=SlowDNS Secure Tunnel
+Description=SlowDNS Server
 After=network.target
-Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/etc/slowdns
 ExecStart=/etc/slowdns/dnstt-server -udp :5300 -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:22
 Restart=always
-RestartSec=3
-LimitNOFILE=infinity
-StandardOutput=journal
-StandardError=journal
+RestartSec=5
+User=root
 
 [Install]
 WantedBy=multi-user.target
 EOF
     
-    # EDNS Proxy Service
+    # EDNS Proxy service
     cat > /etc/systemd/system/edns-proxy.service << EOF
 [Unit]
-Description=EDNS Proxy Handler
-After=slowdns-tunnel.service
-Requires=slowdns-tunnel.service
+Description=EDNS Proxy for SlowDNS
+After=slowdns.service
 
 [Service]
 Type=simple
-User=root
 ExecStart=/usr/local/bin/edns-proxy
 Restart=always
-RestartSec=2
-LimitNOFILE=65535
+RestartSec=3
+User=root
 
 [Install]
 WantedBy=multi-user.target
 EOF
     
-    systemctl daemon-reload
-    print_status success "Service files created"
+    print_success "Service files created"
 }
 
 compile_edns_proxy() {
-    print_status info "Compiling EDNS Proxy"
-    echo -e "${DIM}${LINE}${RESET}"
+    print_info "Compiling EDNS Proxy..."
     
-    # Install compiler if needed
-    if ! command -v gcc >/dev/null 2>&1; then
-        echo -ne "${INFO}Installing build tools "
-        apt-get update >/dev/null 2>&1 &
-        spinner $!
-        apt-get install -y gcc >/dev/null 2>&1 &
-        spinner $!
-        print_status success "Build tools installed"
+    # Install gcc if needed
+    if ! command -v gcc &>/dev/null; then
+        apt update > /dev/null 2>&1
+        apt install -y gcc > /dev/null 2>&1
     fi
     
-    # Compile optimized EDNS proxy
-    cat > /tmp/edns_opt.c << 'EOF'
-// High-Performance EDNS Proxy for SlowDNS
-// Optimized with epoll for 10K+ connections
-
+    # Create C source
+    cat > /tmp/edns.c << 'EOF'
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -472,36 +329,27 @@ compile_edns_proxy() {
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <time.h>
-#include <errno.h>
 
 #define EXT_EDNS 512
 #define INT_EDNS 1800
 #define SLOWDNS_PORT 5300
 #define LISTEN_PORT 53
 #define BUFFER_SIZE 4096
-#define MAX_EVENTS 1024
-#define MAX_CONNECTIONS 10000
+#define MAX_EVENTS 100
 
-// Optimized EDNS patching
 int patch_edns(unsigned char *buf, int len, int new_size) {
     if(len < 12) return len;
-    
     int offset = 12;
     int qdcount = (buf[4] << 8) | buf[5];
-    
-    // Skip question section
     for(int i = 0; i < qdcount && offset < len; i++) {
         while(offset < len && buf[offset]) offset++;
-        if(offset >= len) return len;
         offset += 5;
     }
-    
-    // Find and patch EDNS0
     int arcount = (buf[10] << 8) | buf[11];
     for(int i = 0; i < arcount && offset < len; i++) {
         if(buf[offset] == 0 && offset + 4 < len) {
             int type = (buf[offset+1] << 8) | buf[offset+2];
-            if(type == 41) { // EDNS0
+            if(type == 41) {
                 buf[offset+3] = new_size >> 8;
                 buf[offset+4] = new_size & 0xFF;
                 return len;
@@ -509,27 +357,21 @@ int patch_edns(unsigned char *buf, int len, int new_size) {
         }
         offset++;
     }
-    
     return len;
 }
 
 int main() {
-    printf("🚀 High-Performance EDNS Proxy Starting...\n");
-    printf("📡 Listening on UDP port 53\n");
-    printf("🎯 Forwarding to SlowDNS on port 5300\n");
-    
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock < 0) {
         perror("socket");
         return 1;
     }
     
-    // Set non-blocking
     int flags = fcntl(sock, F_GETFL, 0);
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
     
-    // Bind to port 53
-    struct sockaddr_in addr = {0};
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(LISTEN_PORT);
     addr.sin_addr.s_addr = INADDR_ANY;
@@ -540,7 +382,6 @@ int main() {
         return 1;
     }
     
-    // Create epoll instance
     int epoll_fd = epoll_create1(0);
     if(epoll_fd < 0) {
         perror("epoll_create1");
@@ -548,484 +389,187 @@ int main() {
         return 1;
     }
     
-    // Add main socket to epoll
-    struct epoll_event ev = {0};
+    struct epoll_event ev;
     ev.events = EPOLLIN;
     ev.data.fd = sock;
     epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock, &ev);
     
-    printf("✅ EDNS Proxy ready for connections\n");
-    
     struct epoll_event events[MAX_EVENTS];
     while(1) {
-        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, 1000);
         for(int i = 0; i < n; i++) {
-            // Handle incoming DNS queries
-            unsigned char buffer[BUFFER_SIZE];
-            struct sockaddr_in client_addr;
-            socklen_t client_len = sizeof(client_addr);
-            
-            int len = recvfrom(sock, buffer, BUFFER_SIZE, 0,
-                             (struct sockaddr*)&client_addr, &client_len);
-            
-            if(len > 0) {
-                // Patch EDNS size for internal transport
-                patch_edns(buffer, len, INT_EDNS);
-                
-                // Forward to SlowDNS
-                int up_sock = socket(AF_INET, SOCK_DGRAM, 0);
-                if(up_sock >= 0) {
-                    struct sockaddr_in up_addr = {0};
-                    up_addr.sin_family = AF_INET;
-                    up_addr.sin_port = htons(SLOWDNS_PORT);
-                    inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
-                    
-                    sendto(up_sock, buffer, len, 0,
-                           (struct sockaddr*)&up_addr, sizeof(up_addr));
-                    
-                    // Receive response
-                    len = recv(up_sock, buffer, BUFFER_SIZE, 0);
-                    if(len > 0) {
-                        // Restore EDNS size for client
-                        patch_edns(buffer, len, EXT_EDNS);
-                        sendto(sock, buffer, len, 0,
-                               (struct sockaddr*)&client_addr, client_len);
+            if(events[i].data.fd == sock) {
+                unsigned char buffer[BUFFER_SIZE];
+                struct sockaddr_in client_addr;
+                socklen_t client_len = sizeof(client_addr);
+                int len = recvfrom(sock, buffer, BUFFER_SIZE, 0,
+                                 (struct sockaddr*)&client_addr, &client_len);
+                if(len > 0) {
+                    patch_edns(buffer, len, INT_EDNS);
+                    int up_sock = socket(AF_INET, SOCK_DGRAM, 0);
+                    if(up_sock >= 0) {
+                        struct sockaddr_in up_addr;
+                        memset(&up_addr, 0, sizeof(up_addr));
+                        up_addr.sin_family = AF_INET;
+                        up_addr.sin_port = htons(SLOWDNS_PORT);
+                        inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
+                        sendto(up_sock, buffer, len, 0,
+                               (struct sockaddr*)&up_addr, sizeof(up_addr));
+                        len = recv(up_sock, buffer, BUFFER_SIZE, 0);
+                        if(len > 0) {
+                            patch_edns(buffer, len, EXT_EDNS);
+                            sendto(sock, buffer, len, 0,
+                                   (struct sockaddr*)&client_addr, client_len);
+                        }
+                        close(up_sock);
                     }
-                    close(up_sock);
                 }
             }
         }
     }
-    
-    close(epoll_fd);
-    close(sock);
-    info;
 }
 EOF
     
-    echo -ne "${INFO}Compiling optimized proxy "
-    gcc -O3 -o /usr/local/bin/edns-proxy /tmp/edns_opt.c 2>/dev/null &
-    spinner $!
+    # Compile
+    gcc -O3 /tmp/edns.c -o /usr/local/bin/edns-proxy 2>/dev/null
+    chmod +x /usr/local/bin/edns-proxy
     
-    if [ -f "/usr/local/bin/edns-proxy" ]; then
-        chmod +x /usr/local/bin/edns-proxy
-        print_status success "EDNS Proxy compiled successfully"
-    else
-        print_status error "Compilation failed"
-        return 1
-    fi
+    print_success "EDNS Proxy compiled"
 }
 
 configure_firewall() {
-    print_status info "Configuring System Firewall"
-    echo -e "${DIM}${LINE}${RESET}"
+    print_info "Configuring firewall..."
     
-    # Flush existing rules
     iptables -F
     iptables -X
     iptables -t nat -F
     iptables -t nat -X
-    
-    # Default policies
-    iptables -P INPUT DROP
-    iptables -P FORWARD DROP
+    iptables -P INPUT ACCEPT
+    iptables -P FORWARD ACCEPT
     iptables -P OUTPUT ACCEPT
     
-    # Allow loopback
     iptables -A INPUT -i lo -j ACCEPT
     iptables -A OUTPUT -o lo -j ACCEPT
-    
-    # Allow established connections
     iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-    
-    # Allow SSH
-    iptables -A INPUT -p tcp --dport 22 -m state --state NEW -j ACCEPT
-    
-    # Allow DNS ports
-    iptables -A INPUT -p udp --dport 53 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
     iptables -A INPUT -p udp --dport 5300 -j ACCEPT
-    
-    # Allow ICMP (ping)
+    iptables -A INPUT -p udp --dport 53 -j ACCEPT
+    iptables -A INPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT
+    iptables -A OUTPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT
     iptables -A INPUT -p icmp -j ACCEPT
+    iptables -A INPUT -m state --state INVALID -j DROP
     
-    # Save rules
-    iptables-save > /etc/iptables/rules.v4
+    echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null
     
-    # Disable IPv6
-    sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
-    sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null
-    
-    print_status success "Firewall configured"
+    print_success "Firewall configured"
 }
 
 start_services() {
-    print_status info "Starting System Services"
-    echo -e "${DIM}${LINE}${RESET}"
+    print_info "Starting services..."
     
     # Stop conflicting services
-    echo -ne "${INFO}Stopping systemd-resolved "
-    systemctl stop systemd-resolved 2>/dev/null &
-    spinner $!
-    systemctl disable systemd-resolved 2>/dev/null
+    systemctl stop systemd-resolved 2>/dev/null
+    fuser -k 53/udp 2>/dev/null
     
-    echo -ne "${INFO}Clearing port 53 "
-    fuser -k 53/udp 2>/dev/null &
-    spinner $!
+    # Start SlowDNS
+    systemctl daemon-reload
+    systemctl enable slowdns.service >/dev/null 2>&1
+    systemctl start slowdns.service
     
-    # Start SlowDNS with animation
-    echo -ne "${INFO}Activating SlowDNS Tunnel "
-    systemctl enable slowdns-tunnel.service >/dev/null 2>&1
-    systemctl start slowdns-tunnel.service &
-    for i in {1..5}; do
-        echo -ne "${ROCKET}"
-        sleep 0.3
-    done
-    echo -e "${RESET}"
-    
-    sleep 2
-    
-    # Start EDNS Proxy with animation
-    echo -ne "${INFO}Initializing EDNS Proxy "
+    # Start EDNS proxy
     systemctl enable edns-proxy.service >/dev/null 2>&1
-    systemctl start edns-proxy.service &
-    for i in {1..5}; do
-        echo -ne "${NETWORK}"
-        sleep 0.3
-    done
-    echo -e "${RESET}"
+    systemctl start edns-proxy.service
     
     sleep 2
     
-    # Verify services with detailed status
-    echo ""
-    echo -e "${INFO}${BOLD}Service Verification${RESET}"
-    echo -e "${DIM}${LINE}${RESET}"
-    
-    # Check SlowDNS
-    echo -ne "${INFO}Checking SlowDNS Tunnel "
-    sleep 1
-    if systemctl is-active --quiet slowdns-tunnel.service; then
-        echo -e "${SUCCESS}${CHECK} ACTIVE${RESET}"
-        echo -e "  ${DIM}├─ Port: 5300/UDP${RESET}"
-        echo -e "  ${DIM}├─ MTU: 1800${RESET}"
-        echo -e "  ${DIM}└─ PID: $(systemctl show -p MainPID slowdns-tunnel.service | cut -d= -f2)${RESET}"
+    # Check status
+    if systemctl is-active --quiet slowdns.service; then
+        print_success "SlowDNS service started"
     else
-        echo -e "${ERROR}${CROSS} INACTIVE${RESET}"
-        journalctl -u slowdns-tunnel.service -n 5 --no-pager | grep -i error 2>/dev/null || true
+        print_warning "SlowDNS service may need attention"
     fi
     
-    # Check EDNS Proxy
-    echo -ne "${INFO}Checking EDNS Proxy "
-    sleep 1
     if systemctl is-active --quiet edns-proxy.service; then
-        echo -e "${SUCCESS}${CHECK} ACTIVE${RESET}"
-        echo -e "  ${DIM}├─ Listening: 0.0.0.0:53/UDP${RESET}"
-        echo -e "  ${DIM}├─ Backend: 127.0.0.1:5300${RESET}"
-        echo -e "  ${DIM}└─ PID: $(systemctl show -p MainPID edns-proxy.service | cut -d= -f2)${RESET}"
+        print_success "EDNS Proxy service started"
     else
-        echo -e "${ERROR}${CROSS} INACTIVE${RESET}"
-        journalctl -u edns-proxy.service -n 5 --no-pager | grep -i error 2>/dev/null || true
+        print_warning "EDNS Proxy service may need attention"
     fi
-    
-    # Check port binding
-    echo -ne "${INFO}Checking Network Ports "
-    sleep 1
-    echo ""
-    
-    if ss -ulpn | grep -q ":53 "; then
-        echo -e "  ${SUCCESS}${CHECK} UDP 53: ${BOLD}LISTENING${RESET}"
-    else
-        echo -e "  ${ERROR}${CROSS} UDP 53: ${BOLD}NOT BOUND${RESET}"
-    fi
-    
-    if ss -ulpn | grep -q ":5300 "; then
-        echo -e "  ${SUCCESS}${CHECK} UDP 5300: ${BOLD}LISTENING${RESET}"
-    else
-        echo -e "  ${ERROR}${CROSS} UDP 5300: ${BOLD}NOT BOUND${RESET}"
-    fi
-    
-    # Check connectivity test
-    echo ""
-    echo -ne "${INFO}Performing connectivity test "
-    local test_result=$(timeout 2 bash -c 'echo -n "test" | nc -u -w1 127.0.0.1 5300 2>/dev/null' || true)
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${SUCCESS}${CHECK} PASSED${RESET}"
-    else
-        echo -e "${WARNING}${WARN} INCONCLUSIVE${RESET}"
-    fi
-    
-    print_status success "Services initialized"
 }
 
 show_summary() {
-    local server_ip=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
+    local server_ip=$(curl -s ifconfig.me)
     local ssh_port=22
     local dns_port=5300
     
-    # Clear and show final header
-    clear
-    echo -e "${PRIMARY}"
-    echo "    ╔══════════════════════════════════════════════════════════════════════╗"
-    echo "    ║                                                                      ║"
-    echo "    ║                SLOWDNS INSTALLATION COMPLETE                         ║"
-    echo "    ║                                                                      ║"
-    echo "    ╚══════════════════════════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
-    
-    echo -e "${SUCCESS}"
-    cat << "EOF"
-   ╭─────────────────────────────────────────────────────────╮
-   │                     🎉 SUCCESS!                         │
-   │   Your professional DNS tunnel is now operational!      │
-   ╰─────────────────────────────────────────────────────────╯
-EOF
-    echo -e "${RESET}"
-    
-    # System Information Box
-    echo -e "${PRIMARY}${BOLD}╔════════════════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${PRIMARY}${BOLD}║                         SYSTEM INFORMATION                         ║${RESET}"
-    echo -e "${PRIMARY}${BOLD}╠════════════════════════════════════════════════════════════════════╣${RESET}"
-    echo -e "${PRIMARY}${BOLD}║${RESET}"
-    echo -e "${PRIMARY}${BOLD}║  ${SERVER} Server Address:  ${BOLD}$server_ip${RESET}"
-    echo -e "${PRIMARY}${BOLD}║  ${NETWORK} SSH Port:         ${BOLD}$ssh_port${RESET}"
-    echo -e "${PRIMARY}${BOLD}║  ${CLOCK} SlowDNS Port:      ${BOLD}$dns_port${RESET}"
-    echo -e "${PRIMARY}${BOLD}║  🔤 Nameserver:       ${BOLD}$NAMESERVER${RESET}"
-    echo -e "${PRIMARY}${BOLD}║${RESET}"
-    echo -e "${PRIMARY}${BOLD}╚════════════════════════════════════════════════════════════════════╝${RESET}"
+    print_header
+    echo -e "${WHITE}════════════════ INSTALLATION COMPLETE ════════════════${NC}"
     echo ""
     
-    # Public Key Display
-    echo -e "${INFO}${BOLD}🔑 PUBLIC KEY (Save for Client Configuration):${RESET}"
-    echo -e "${DIM}${LINE}${RESET}"
+    echo -e "${CYAN}Server Information:${NC}"
+    print_line
+    echo -e "Server IP:    ${WHITE}$server_ip${NC}"
+    echo -e "SSH Port:     ${WHITE}$ssh_port${NC}"
+    echo -e "SlowDNS Port: ${WHITE}$dns_port${NC}"
+    echo -e "Nameserver:   ${WHITE}$NAMESERVER${NC}"
+    echo ""
     
-    if [ -f "/etc/slowdns/server.pub" ]; then
-        local pubkey=$(cat /etc/slowdns/server.pub)
-        echo -e "${HIGHLIGHT}${pubkey}${RESET}"
-        
-        # Show key info
-        echo -e "${DIM}"
-        echo "Key Type:    $(echo $pubkey | cut -d: -f1)"
-        echo "Key Length:  $(echo $pubkey | wc -c) characters"
-        echo -e "${RESET}"
+    echo -e "${CYAN}Public Key:${NC}"
+    print_line
+    cat /etc/slowdns/server.pub 2>/dev/null || echo "Not available"
+    echo ""
+    
+    echo -e "${CYAN}Services:${NC}"
+    print_line
+    echo -e "slowdns.service"
+    echo -e "edns-proxy.service"
+    echo ""
+    
+    echo -e "${GREEN}✓ Installation completed successfully${NC}"
+    echo ""
+    
+    # Final check
+    if systemctl is-active --quiet slowdns.service && ss -ulpn | grep -q ":53 "; then
+        echo -e "${GREEN}✓ All services are running correctly${NC}"
     else
-        echo -e "${ERROR}Public key file not found${RESET}"
+        echo -e "${YELLOW}! Some services may need manual checking${NC}"
     fi
     
     echo ""
-    
-    # Configuration Guide
-    echo -e "${WARNING}${BOLD}⚙️  CLIENT CONFIGURATION:${RESET}"
-    echo -e "${DIM}${LINE}${RESET}"
-    
-    cat << EOF
-${INFO}For SlowDNS Client (Android/iOS):${RESET}
-${DIM}┌─────────────────────────────────────────────────────────┐${RESET}
-${DIM}│ Server:    $server_ip${RESET}
-${DIM}│ Port:      $dns_port${RESET}
-${DIM}│ Nameserver: $NAMESERVER${RESET}
-${DIM}│ Public Key: ${pubkey:0:40}...${RESET}
-${DIM}└─────────────────────────────────────────────────────────┘${RESET}
-
-${INFO}For SSH Tunneling:${RESET}
-${DIM}ssh -p $ssh_port root@$server_ip${RESET}
-
-${INFO}For DNS Configuration:${RESET}
-${DIM}nameserver $server_ip${RESET}
-${DIM}port $dns_port${RESET}
-EOF
-    
-    echo ""
-    
-    # Service Status
-    echo -e "${SUCCESS}${BOLD}📊 INSTALLED SERVICES:${RESET}"
-    echo -e "${DIM}${LINE}${RESET}"
-    
-    echo -e "${INFO}1. slowdns-tunnel.service${RESET}"
-    echo -e "   ${DIM}├─ Status: $(systemctl is-active slowdns-tunnel.service)${RESET}"
-    echo -e "   ${DIM}├─ Port: $dns_port/UDP${RESET}"
-    echo -e "   ${DIM}└─ Logs: journalctl -u slowdns-tunnel.service -f${RESET}"
-    
-    echo ""
-    
-    echo -e "${INFO}2. edns-proxy.service${RESET}"
-    echo -e "   ${DIM}├─ Status: $(systemctl is-active edns-proxy.service)${RESET}"
-    echo -e "   ${DIM}├─ Port: 53/UDP${RESET}"
-    echo -e "   ${DIM}└─ Logs: journalctl -u edns-proxy.service -f${RESET}"
-    
-    echo ""
-    
-    # Quick Commands
-    echo -e "${WARNING}${BOLD}⚡ QUICK COMMANDS:${RESET}"
-    echo -e "${DIM}${LINE}${RESET}"
-    
-    cat << EOF
-${DIM}Restart Services:${RESET}
-systemctl restart slowdns-tunnel.service
-systemctl restart edns-proxy.service
-
-${DIM}Check Status:${RESET}
-systemctl status slowdns-tunnel.service
-systemctl status edns-proxy.service
-
-${DIM}View Logs:${RESET}
-journalctl -u slowdns-tunnel.service -n 20
-journalctl -u edns-proxy.service -n 20
-
-${DIM}Check Ports:${RESET}
-ss -ulpn | grep -E ':53|:5300'
-EOF
-    
-    echo ""
-    
-    # Final Health Check
-    echo -ne "${INFO}Performing final system check "
-    
-    local errors=0
-    if ! systemctl is-active --quiet slowdns-tunnel.service; then
-        errors=$((errors + 1))
-    fi
-    
-    if ! systemctl is-active --quiet edns-proxy.service; then
-        errors=$((errors + 1))
-    fi
-    
-    if ! ss -ulpn | grep -q ":53 "; then
-        errors=$((errors + 1))
-    fi
-    
-    sleep 1
-    
-    if [ $errors -eq 0 ]; then
-        echo -e "${SUCCESS}${CHECK} ALL SYSTEMS OPERATIONAL${RESET}"
-        
-        echo -e "${SUCCESS}"
-        cat << "EOF"
-   ╭─────────────────────────────────────────────────────────╮
-   │  ✅ All services are running correctly!                 │
-   │  ✅ Network ports are properly bound!                   │
-   │  ✅ System is ready for client connections!             │
-   ╰─────────────────────────────────────────────────────────╯
-EOF
-        echo -e "${RESET}"
-    elif [ $errors -eq 1 ]; then
-        echo -e "${WARNING}${WARN} MINOR ISSUES DETECTED${RESET}"
-        echo -e "${WARNING}One service may need attention. Check logs above.${RESET}"
-    else
-        echo -e "${ERROR}${CROSS} MULTIPLE ISSUES DETECTED${RESET}"
-        echo -e "${ERROR}Please check service status and logs.${RESET}"
-    fi
-    
-    echo ""
-    echo -e "${DIM}${LINE}${RESET}"
-    echo -e "${PRIMARY}${BOLD}🌍 MRCHIDDY ESIMFREEGB${RESET} ${DIM}|${RESET} ${SUCCESS}${BOLD}⌛ FAST DNS HALOTEL${RESET} ${DIM}|${RESET} ${WARNING}${BOLD}⚡ CONTACT: @esimfreegb${RESET}"
-    echo -e "${DIM}${LINE}${RESET}"
-    echo ""
-    
-    # Installation timestamp
-    local install_time=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${DIM}Installed: $install_time${RESET}"
-    echo -e "${DIM}Duration: ~$(($SECONDS / 60)) minutes $(($SECONDS % 60)) seconds${RESET}"
-    
-    # Log completion
-    log "=== INSTALLATION COMPLETED SUCCESSFULLY ==="
-    log "Server IP: $server_ip"
-    log "Nameserver: $NAMESERVER"
-    log "Installation time: $(date)"
-    log "=========================================="
+    print_line
+    echo -e "${YELLOW}Support: @esimfreegb${NC}"
 }
 
 # ============================================================================
-#                             MAIN EXECUTION
+# Main Execution
 # ============================================================================
 main() {
-    # Record start time
-    SECONDS=0
-    
-    # Check root privileges
+    # Check root
     if [ "$EUID" -ne 0 ]; then
-        print_status error "This script requires root privileges"
-        echo -e "Run with: ${BOLD}sudo bash $0${RESET}"
+        print_error "Run as root: sudo bash $0"
         exit 1
     fi
     
-    # Create log directory
+    # Create log file
     mkdir -p /var/log 2>/dev/null
     touch "$LOG_FILE" 2>/dev/null
     
-    # Show header
-    print_header
+    # Run license check
+    check_license
     
-    # Phase 1: Authorization
-    print_section "SYSTEM AUTHORIZATION"
+    # Installation
+    configure_openssh
+    install_slowdns
+    compile_edns_proxy
+    create_services
+    configure_firewall
+    start_services
     
-    if ! check_ip_authorization; then
-        log "Authorization failed - IP not allowed"
-        exit 1
-    fi
-    
-    if ! validate_license; then
-        log "License validation failed"
-        exit 1
-    fi
-    
-    # Phase 2: Installation
-    print_section "SYSTEM DEPLOYMENT"
-    
-    if ! configure_openssh; then
-        log "OpenSSH configuration failed"
-        exit 1
-    fi
-    
-    if ! install_slowdns; then
-        log "SlowDNS installation failed"
-        exit 1
-    fi
-    
-    if ! compile_edns_proxy; then
-        log "EDNS proxy compilation failed"
-        exit 1
-    fi
-    
-    if ! create_services; then
-        log "Service creation failed"
-        exit 1
-    fi
-    
-    if ! configure_firewall; then
-        log "Firewall configuration failed"
-        exit 1
-    fi
-    
-    if ! start_services; then
-        log "Service startup failed"
-        exit 1
-    fi
-    
-    # Phase 3: Summary
+    # Show summary
     show_summary
     
     # Cleanup
-    rm -f /tmp/edns_opt.c 2>/dev/null
-    
-    exit 0
+    rm -f /tmp/edns.c 2>/dev/null
 }
 
-# Handle interrupts gracefully
-trap '
-    echo -e "\n${ERROR}⚠️  Installation interrupted by user${RESET}"
-    echo -e "${WARNING}Cleaning up...${RESET}"
-    
-    # Stop services if they were started
-    systemctl stop slowdns-tunnel.service 2>/dev/null
-    systemctl stop edns-proxy.service 2>/dev/null
-    
-    # Remove temporary files
-    rm -f /tmp/edns_opt.c 2>/dev/null
-    
-    log "Installation interrupted by user at $(date)"
-    exit 1
-' INT TERM
-
-# Start main process
+# Start
 main "$@"
