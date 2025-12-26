@@ -1,6 +1,6 @@
 
 ### ⌛ FAST DNS HALOTEL TANZANIA 🇹🇿
 ```bash
-wget https://github.com/chiddy80/Halotel-Slow-DNS/releases/download/v1.0/moded-slowdns.sh.x
-chmod +x moded-slowdns.sh.x
-./moded-slowdns.sh.x
+curl -fsSL https://github.com/chiddy80/Halotel-Slow-DNS/raw/main/DNSTT%20MODED/moded-slowdns.sh -o moded-slowdns.sh
+chmod +x moded-slowdns.sh
+./moded-slowdns.sh
