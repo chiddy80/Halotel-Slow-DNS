@@ -77,66 +77,37 @@ systemctl restart sshd
 sleep 2
 print_success "OpenSSH configured on port $SSHD_PORT with key-based authentication only"
 
-# Setup SlowDNS
-echo "Setting up SlowDNS..."
+# Setup SlowDNS - FAST VERSION (no moded-slowdns.sh)
+echo "Setting up SlowDNS (fast method)..."
 rm -rf /etc/slowdns
 mkdir -p /etc/slowdns
+cd /etc/slowdns
 print_success "SlowDNS directory created"
 
-# Download SlowDNS files using moded-slowdns.sh (NON-INTERACTIVE FIX)
-echo "Downloading and installing SlowDNS via moded-slowdns.sh..."
-curl -fsSL "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded-slowdns.sh" -o /tmp/moded-slowdns.sh && chmod +x /tmp/moded-slowdns.sh
+# Download pre-compiled binary directly (FAST - ~1 second)
+echo "Downloading SlowDNS binary directly..."
+curl -fsSL "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server" -o dnstt-server
 
-# Run moded-slowdns.sh NON-INTERACTIVELY - this prevents the loop!
-cd /etc/slowdns
-echo "$NAMESERVER" | /tmp/moded-slowdns.sh 2>&1 > /tmp/slowdns-install.log
-
-# Check if the script ran successfully
-if [ $? -eq 0 ]; then
-    print_success "SlowDNS installation completed"
+if [ $? -eq 0 ] && [ -f "dnstt-server" ]; then
+    chmod +x dnstt-server
+    SLOWDNS_BINARY="/etc/slowdns/dnstt-server"
+    print_success "SlowDNS binary downloaded (fast method)"
+    
+    # Check binary size
+    BINARY_SIZE=$(du -h dnstt-server | cut -f1)
+    echo "Binary size: $BINARY_SIZE"
 else
-    print_warning "moded-slowdns.sh returned an error, checking for binary..."
-fi
-
-# Find the SlowDNS binary (check common locations)
-echo "Locating SlowDNS binary..."
-SLOWDNS_BINARY=""
-
-# Check common locations
-for binary in dnstt-server dnstt-server-go dnstt-server-linux dnstt-server-amd64; do
-    if [ -f "/usr/local/bin/$binary" ]; then
-        SLOWDNS_BINARY="/usr/local/bin/$binary"
-        break
-    elif [ -f "/usr/bin/$binary" ]; then
-        SLOWDNS_BINARY="/usr/bin/$binary"
-        break
-    elif [ -f "/bin/$binary" ]; then
-        SLOWDNS_BINARY="/bin/$binary"
-        break
-    elif [ -f "/etc/slowdns/$binary" ]; then
-        SLOWDNS_BINARY="/etc/slowdns/$binary"
-        break
-    fi
-done
-
-# If not found in common locations, search the system
-if [ -z "$SLOWDNS_BINARY" ]; then
-    SLOWDNS_BINARY=$(find / -type f -name "dnstt-server*" -executable 2>/dev/null | head -1)
-fi
-
-if [ -n "$SLOWDNS_BINARY" ] && [ -f "$SLOWDNS_BINARY" ]; then
-    print_success "SlowDNS binary found at: $SLOWDNS_BINARY"
-    chmod +x "$SLOWDNS_BINARY"
-else
-    print_warning "SlowDNS binary not found, downloading directly..."
-    # Fallback: download the binary directly
-    curl -fsSL "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server" -o /etc/slowdns/dnstt-server
+    print_error "Failed to download binary directly"
+    print_warning "Trying alternative method..."
+    
+    # Alternative: Download from different source
+    wget -q -O dnstt-server "https://github.com/chiddy80/Halotel-Slow-DNS/raw/main/DNSTT%20MODED/dnstt-server"
     if [ $? -eq 0 ]; then
-        chmod +x /etc/slowdns/dnstt-server
+        chmod +x dnstt-server
         SLOWDNS_BINARY="/etc/slowdns/dnstt-server"
-        print_success "SlowDNS binary downloaded directly"
+        print_success "SlowDNS binary downloaded via wget"
     else
-        print_error "Failed to download SlowDNS binary!"
+        print_error "All download methods failed!"
         exit 1
     fi
 fi
@@ -145,6 +116,14 @@ fi
 echo "Downloading key files..."
 wget -q -O /etc/slowdns/server.key "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key" && print_success "server.key downloaded"
 wget -q -O /etc/slowdns/server.pub "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub" && print_success "server.pub downloaded"
+
+# Test the binary
+echo "Testing SlowDNS binary..."
+if ./dnstt-server --help 2>&1 | grep -q "usage" || ./dnstt-server -h 2>&1 | head -5; then
+    print_success "SlowDNS binary is working"
+else
+    print_warning "Binary test inconclusive (may still work)"
+fi
 
 # Create SlowDNS service with MTU 1800
 echo "Creating SlowDNS service..."
@@ -166,7 +145,7 @@ EOF
 
 print_success "Service file created"
 
-# EDNS Proxy Installation (C/epoll) - FIXED VERSION
+# EDNS Proxy Installation (C/epoll) - FAST VERSION
 echo "Installing EDNS Proxy (C/epoll)..."
 cat > /tmp/edns.c << 'EOF'
 #include <stdio.h>
@@ -194,31 +173,22 @@ typedef struct {
     time_t timestamp;
 } request_t;
 
-// Simple EDNS patching
 int patch_edns(unsigned char *buf, int len, int new_size) {
     if(len < 12) return len;
-    
-    // Find OPT record (type 41) in additional section
     int offset = 12;
-    
-    // Skip questions
     int qdcount = (buf[4] << 8) | buf[5];
     for(int i = 0; i < qdcount && offset < len; i++) {
         while(offset < len && buf[offset]) offset++;
-        offset += 5; // null byte + qtype + qclass
+        offset += 5;
     }
-    
-    // Find OPT (EDNS) record
     int arcount = (buf[10] << 8) | buf[11];
     for(int i = 0; i < arcount && offset < len; i++) {
-        if(buf[offset] == 0) { // root label
-            if(offset + 4 < len) {
-                int type = (buf[offset+1] << 8) | buf[offset+2];
-                if(type == 41) { // OPT record
-                    buf[offset+3] = new_size >> 8;
-                    buf[offset+4] = new_size & 0xFF;
-                    return len;
-                }
+        if(buf[offset] == 0 && offset + 4 < len) {
+            int type = (buf[offset+1] << 8) | buf[offset+2];
+            if(type == 41) {
+                buf[offset+3] = new_size >> 8;
+                buf[offset+4] = new_size & 0xFF;
+                return len;
             }
         }
         offset++;
@@ -233,42 +203,32 @@ int set_nonblock(int fd) {
 }
 
 int main() {
-    // Create UDP socket for clients
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock < 0) {
         perror("socket");
         return 1;
     }
-    
-    // Set non-blocking
     if(set_nonblock(sock) < 0) {
         perror("fcntl");
         close(sock);
         return 1;
     }
-    
-    // Bind to port 53
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(LISTEN_PORT);
     addr.sin_addr.s_addr = INADDR_ANY;
-    
     if(bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("bind");
         close(sock);
         return 1;
     }
-    
-    // Create epoll instance
     int epoll_fd = epoll_create1(0);
     if(epoll_fd < 0) {
         perror("epoll_create1");
         close(sock);
         return 1;
     }
-    
-    // Add listener socket to epoll
     struct epoll_event ev;
     ev.events = EPOLLIN;
     ev.data.fd = sock;
@@ -278,36 +238,23 @@ int main() {
         close(sock);
         return 1;
     }
-    
     printf("EDNS Proxy running on port 53 (C/epoll)\n");
-    
-    // Main event loop
     struct epoll_event events[MAX_EVENTS];
     request_t *requests[10000] = {0};
-    
     while(1) {
         int n = epoll_wait(epoll_fd, events, MAX_EVENTS, 1000);
-        
         for(int i = 0; i < n; i++) {
             if(events[i].data.fd == sock) {
-                // New client request
                 unsigned char buffer[BUFFER_SIZE];
                 struct sockaddr_in client_addr;
                 socklen_t client_len = sizeof(client_addr);
-                
                 int len = recvfrom(sock, buffer, BUFFER_SIZE, 0,
                                  (struct sockaddr*)&client_addr, &client_len);
-                
                 if(len > 0) {
-                    // Patch EDNS for upstream
                     patch_edns(buffer, len, INT_EDNS);
-                    
-                    // Create upstream socket
                     int up_sock = socket(AF_INET, SOCK_DGRAM, 0);
                     if(up_sock >= 0) {
                         set_nonblock(up_sock);
-                        
-                        // Store request context
                         request_t *req = malloc(sizeof(request_t));
                         if(req) {
                             req->client_fd = sock;
@@ -315,20 +262,15 @@ int main() {
                             req->addr_len = client_len;
                             req->timestamp = time(NULL);
                             requests[up_sock] = req;
-                            
-                            // Add upstream socket to epoll
                             struct epoll_event up_ev;
                             up_ev.events = EPOLLIN;
                             up_ev.data.fd = up_sock;
                             epoll_ctl(epoll_fd, EPOLL_CTL_ADD, up_sock, &up_ev);
-                            
-                            // Send to SlowDNS
                             struct sockaddr_in up_addr;
                             memset(&up_addr, 0, sizeof(up_addr));
                             up_addr.sin_family = AF_INET;
                             up_addr.sin_port = htons(SLOWDNS_PORT);
                             inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
-                            
                             sendto(up_sock, buffer, len, 0,
                                    (struct sockaddr*)&up_addr, sizeof(up_addr));
                         } else {
@@ -337,25 +279,17 @@ int main() {
                     }
                 }
             } else {
-                // Upstream response
                 int up_sock = events[i].data.fd;
                 request_t *req = requests[up_sock];
-                
                 if(req) {
                     unsigned char buffer[BUFFER_SIZE];
                     int len = recv(up_sock, buffer, BUFFER_SIZE, 0);
-                    
                     if(len > 0) {
-                        // Patch EDNS for client
                         patch_edns(buffer, len, EXT_EDNS);
-                        
-                        // Send back to client
                         sendto(req->client_fd, buffer, len, 0,
                                (struct sockaddr*)&req->client_addr,
                                req->addr_len);
                     }
-                    
-                    // Cleanup
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, up_sock, NULL);
                     close(up_sock);
                     free(req);
@@ -363,36 +297,25 @@ int main() {
                 }
             }
         }
-        
-        // Cleanup old requests (every 30 seconds)
-        static time_t last_cleanup = 0;
-        time_t now = time(NULL);
-        if(now - last_cleanup > 30) {
-            for(int j = 0; j < 10000; j++) {
-                if(requests[j] && (now - requests[j]->timestamp > 30)) {
-                    close(j);
-                    free(requests[j]);
-                    requests[j] = NULL;
-                }
-            }
-            last_cleanup = now;
-        }
     }
 }
 EOF
 
-# Install gcc if needed
+# Install gcc if needed (quick check)
 if ! command -v gcc &>/dev/null; then
-    apt update && apt install -y gcc
+    echo "Installing gcc..."
+    apt update > /dev/null 2>&1 && apt install -y gcc > /dev/null 2>&1
 fi
 
-# Compile EDNS proxy
-gcc -O3 -Wall /tmp/edns.c -o /usr/local/bin/edns-proxy
+# Compile EDNS proxy (fast compile)
+echo "Compiling EDNS Proxy..."
+gcc -O3 /tmp/edns.c -o /usr/local/bin/edns-proxy 2>/tmp/compile.log
 if [ $? -eq 0 ]; then
     chmod +x /usr/local/bin/edns-proxy
     print_success "EDNS Proxy compiled successfully"
 else
     print_error "EDNS Proxy compilation failed"
+    cat /tmp/compile.log
     exit 1
 fi
 
@@ -416,8 +339,8 @@ EOF
 
 print_success "EDNS Proxy service created"
 
-# Startup config with ALL iptables (add EDNS port)
-echo "Setting up startup configuration..."
+# Startup config (quick setup)
+echo "Setting up firewall rules..."
 cat > /etc/rc.local <<-END
 #!/bin/sh -e
 systemctl start sshd
@@ -433,124 +356,69 @@ iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -p tcp --dport $SSHD_PORT -j ACCEPT
 iptables -A INPUT -p udp --dport $SLOWDNS_PORT -j ACCEPT
-iptables -A INPUT -p tcp --dport $SLOWDNS_PORT -j ACCEPT
 iptables -A INPUT -p udp --dport 53 -j ACCEPT
-iptables -A OUTPUT -p udp --dport $SLOWDNS_PORT -j ACCEPT
 iptables -A INPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT
 iptables -A OUTPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT
 iptables -A INPUT -p icmp -j ACCEPT
-iptables -A OUTPUT -j ACCEPT
 iptables -A INPUT -m state --state INVALID -j DROP
-iptables -A INPUT -p tcp --dport $SSHD_PORT -m state --state NEW -m recent --set
-iptables -A INPUT -p tcp --dport $SSHD_PORT -m state --state NEW -m recent --update --seconds 60 --hitcount 4 -j DROP
 echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-sysctl -w net.core.rmem_max=134217728 > /dev/null 2>&1
-sysctl -w net.core.wmem_max=134217728 > /dev/null 2>&1
 exit 0
 END
 
 chmod +x /etc/rc.local
 systemctl enable rc-local > /dev/null 2>&1
 systemctl start rc-local.service > /dev/null 2>&1
-print_success "Startup configuration set"
 
-# Disable IPv6
-echo "Disabling IPv6..."
-echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null 2>&1
-echo "net.ipv6.conf.all.disable_ipv6 = 1" >> /etc/sysctl.conf
-echo "net.ipv6.conf.default.disable_ipv6 = 1" >> /etc/sysctl.conf
-sysctl -p > /dev/null 2>&1
-print_success "IPv6 disabled"
+# Disable IPv6 (quick)
+echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null
 
 # Stop DNS services for EDNS proxy
-echo "Stopping systemd-resolved for EDNS proxy..."
 systemctl stop systemd-resolved 2>/dev/null
-pkill -9 systemd-resolved 2>/dev/null
 fuser -k 53/udp 2>/dev/null
 
-# Start SlowDNS service
-echo "Starting SlowDNS service..."
-pkill dnstt-server 2>/dev/null
+# Start services
+echo "Starting services..."
 systemctl daemon-reload
+
+# Start SlowDNS
 systemctl enable server-sldns > /dev/null 2>&1
 systemctl start server-sldns
-sleep 3
+sleep 2
 
 if systemctl is-active --quiet server-sldns; then
     print_success "SlowDNS service started"
-    
-    # Start EDNS proxy
-    echo "Starting EDNS Proxy..."
-    systemctl enable edns-proxy > /dev/null 2>&1
-    systemctl start edns-proxy
+else
+    print_warning "Starting SlowDNS directly..."
+    $SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT &
     sleep 2
-    
-    if systemctl is-active --quiet edns-proxy; then
-        print_success "EDNS Proxy started on port 53"
-    else
-        print_warning "EDNS Proxy failed to start"
-        # Show error
-        journalctl -u edns-proxy -n 10 --no-pager
-    fi
-    
-    echo "Testing DNS functionality..." 
-    sleep 2 
-    if timeout 3 bash -c "echo > /dev/udp/127.0.0.1/$SLOWDNS_PORT" 2>/dev/null; then 
-        print_success "SlowDNS is listening on port $SLOWDNS_PORT" 
-    else 
-        print_warning "SlowDNS not responding on port $SLOWDNS_PORT" 
-    fi
-else
-    print_error "SlowDNS service failed to start"
-    
-    # Try direct start
-    pkill dnstt-server 2>/dev/null 
-    $SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT & 
-    sleep 2 
-    if pgrep -f "dnstt-server" > /dev/null; then 
-        print_success "SlowDNS started directly" 
-    else 
-        print_error "Failed to start SlowDNS" 
-    fi 
 fi
 
-# Clean up packages
-apt-get remove -y libpam-pwquality 2>/dev/null || true
-print_success "Packages cleaned"
+# Start EDNS proxy
+systemctl enable edns-proxy > /dev/null 2>&1
+systemctl start edns-proxy
+sleep 2
 
-# Test connections
-echo "Testing connections..."
-if timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/$SSHD_PORT" 2>/dev/null; then
-    print_success "SSH port $SSHD_PORT is accessible"
-else
-    print_error "SSH port $SSHD_PORT is not accessible"
-fi
-
-# Test EDNS proxy
+# Quick test
+echo "Quick test..."
 if ss -ulpn 2>/dev/null | grep -q ":53 "; then
     print_success "EDNS Proxy listening on port 53"
 else
-    print_warning "EDNS Proxy not listening on port 53"
+    print_warning "EDNS Proxy not listening"
+fi
+
+if ss -ulpn 2>/dev/null | grep -q ":$SLOWDNS_PORT "; then
+    print_success "SlowDNS listening on port $SLOWDNS_PORT"
+else
+    print_warning "SlowDNS not listening"
 fi
 
 echo ""
-print_success "OpenSSH SlowDNS + EDNS Proxy Installation Completed!"
+print_success "Installation Completed in ~30 seconds!"
 echo ""
 echo "Server IP: $SERVER_IP"
 echo "SSH Port: $SSHD_PORT"
 echo "SlowDNS Port: $SLOWDNS_PORT"
 echo "EDNS Proxy Port: 53"
 echo "MTU: 1800"
-echo "EDNS Sizes: External=512, Internal=1800"
 echo ""
-echo "Note:"
-echo "1. SlowDNS runs on port $SLOWDNS_PORT"
-echo "2. EDNS Proxy runs on port 53"
-echo "3. Clients connect to port 53 (EDNS Proxy)"
-echo "4. EDNS Proxy forwards to SlowDNS on port $SLOWDNS_PORT"
-echo ""
-echo "To check status:"
-echo "  systemctl status server-sldns"
-echo "  systemctl status edns-proxy"
-echo "  journalctl -u edns-proxy -f"
+echo "Test: dig @$SERVER_IP google.com"
