@@ -17,7 +17,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
 WHITE='\033[1;37m'
 NC='\033[0m'
 
@@ -34,16 +33,15 @@ print_header() {
     echo "   ███████║███████╗╚██████╔╝╚███╔███╔╝██████╔╝██║ ╚████║███████║"
     echo "   ╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝"
     echo -e "${NC}"
-    echo -e "${BLUE}┌───────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${BLUE}│${NC} ${WHITE}Professional SlowDNS Tunnel System${NC}                  ${BLUE}│${NC}"
-    echo -e "${BLUE}│${NC} ${YELLOW}🌍 MRCHIDDY ESIMFREEGB | ⌛ FAST DNS HALOTEL${NC}        ${BLUE}│${NC}"
-    echo -e "${BLUE}│${NC} ${PURPLE}⚡ Contact Admin: @esimfreegb${NC}                       ${BLUE}│${NC}"
-    echo -e "${BLUE}└───────────────────────────────────────────────────────────┘${NC}"
+    echo -e "${BLUE}══════════════════════════════════════════════════════════${NC}"
+    echo -e "${WHITE}       Professional SlowDNS Tunnel System${NC}"
+    echo -e "${YELLOW}     🌍 MRCHIDDY ESIMFREEGB | ⌛ FAST DNS HALOTEL${NC}"
+    echo -e "${BLUE}══════════════════════════════════════════════════════════${NC}"
     echo ""
 }
 
 print_line() {
-    echo -e "${BLUE}─────────────────────────────────────────────────────────────${NC}"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────${NC}"
 }
 
 print_success() {
@@ -86,7 +84,7 @@ check_ip_allowed() {
         return 2
     fi
     
-    local clean_list=$(echo "$allowed_ips" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    local clean_list=$(echo "$allowed_ips" | grep -v '^#' | grep -v '^$' | tr -d '[]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
     if echo "$clean_list" | grep -q "^$current_ip$"; then
         return 0
@@ -127,7 +125,7 @@ read_hidden() {
 check_license() {
     print_header
     
-    echo -e "${WHITE}════════════════════ LICENSE VERIFICATION ════════════════════${NC}"
+    echo -e "${WHITE}═════════════ LICENSE VERIFICATION ═════════════${NC}"
     echo ""
     
     # Get VPS IP
@@ -147,7 +145,7 @@ check_license() {
     if ! check_ip_allowed "$CURRENT_IP"; then
         print_error "VPS IP not authorized"
         echo ""
-        print_warning "Contact admin to whitelist your IP:"
+        print_warning "Contact admin to whitelist your IP"
         print_warning "Telegram: @esimfreegb"
         exit 1
     fi
@@ -156,7 +154,7 @@ check_license() {
     echo ""
     
     # License verification
-    echo -e "${WHITE}══════════════════ LICENSE KEY REQUIRED ══════════════════${NC}"
+    echo -e "${WHITE}════════════ LICENSE KEY REQUIRED ═════════════${NC}"
     echo ""
     print_info "Get license key from: @esimfreegb"
     echo ""
@@ -502,7 +500,7 @@ show_summary() {
     local dns_port=5300
     
     print_header
-    echo -e "${WHITE}════════════════ INSTALLATION COMPLETE ════════════════${NC}"
+    echo -e "${WHITE}════════════════ INSTALLATION COMPLETE ═══════════════${NC}"
     echo ""
     
     echo -e "${CYAN}Server Information:${NC}"
