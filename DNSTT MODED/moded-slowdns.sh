@@ -83,26 +83,62 @@ rm -rf /etc/slowdns
 mkdir -p /etc/slowdns
 print_success "SlowDNS directory created"
 
-# Download SlowDNS files using moded-slowdns.sh
+# Download SlowDNS files using moded-slowdns.sh (NON-INTERACTIVE FIX)
 echo "Downloading and installing SlowDNS via moded-slowdns.sh..."
-curl -fsSL "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded-slowdns.sh" -o /etc/slowdns/moded-slowdns.sh && chmod +x /etc/slowdns/moded-slowdns.sh && cd /etc/slowdns && ./moded-slowdns.sh
+curl -fsSL "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded-slowdns.sh" -o /tmp/moded-slowdns.sh && chmod +x /tmp/moded-slowdns.sh
 
-# Find the SlowDNS binary
-if [ -f /usr/local/bin/dnstt-server ]; then
-    SLOWDNS_BINARY="/usr/local/bin/dnstt-server"
-elif [ -f /usr/bin/dnstt-server ]; then
-    SLOWDNS_BINARY="/usr/bin/dnstt-server"
-elif [ -f /bin/dnstt-server ]; then
-    SLOWDNS_BINARY="/bin/dnstt-server"
+# Run moded-slowdns.sh NON-INTERACTIVELY - this prevents the loop!
+cd /etc/slowdns
+echo "$NAMESERVER" | /tmp/moded-slowdns.sh 2>&1 > /tmp/slowdns-install.log
+
+# Check if the script ran successfully
+if [ $? -eq 0 ]; then
+    print_success "SlowDNS installation completed"
 else
-    SLOWDNS_BINARY=$(which dnstt-server || find / -name "dnstt-server" -type f 2>/dev/null | head -1)
+    print_warning "moded-slowdns.sh returned an error, checking for binary..."
+fi
+
+# Find the SlowDNS binary (check common locations)
+echo "Locating SlowDNS binary..."
+SLOWDNS_BINARY=""
+
+# Check common locations
+for binary in dnstt-server dnstt-server-go dnstt-server-linux dnstt-server-amd64; do
+    if [ -f "/usr/local/bin/$binary" ]; then
+        SLOWDNS_BINARY="/usr/local/bin/$binary"
+        break
+    elif [ -f "/usr/bin/$binary" ]; then
+        SLOWDNS_BINARY="/usr/bin/$binary"
+        break
+    elif [ -f "/bin/$binary" ]; then
+        SLOWDNS_BINARY="/bin/$binary"
+        break
+    elif [ -f "/etc/slowdns/$binary" ]; then
+        SLOWDNS_BINARY="/etc/slowdns/$binary"
+        break
+    fi
+done
+
+# If not found in common locations, search the system
+if [ -z "$SLOWDNS_BINARY" ]; then
+    SLOWDNS_BINARY=$(find / -type f -name "dnstt-server*" -executable 2>/dev/null | head -1)
 fi
 
 if [ -n "$SLOWDNS_BINARY" ] && [ -f "$SLOWDNS_BINARY" ]; then
     print_success "SlowDNS binary found at: $SLOWDNS_BINARY"
+    chmod +x "$SLOWDNS_BINARY"
 else
-    print_error "SlowDNS binary not found!"
-    exit 1
+    print_warning "SlowDNS binary not found, downloading directly..."
+    # Fallback: download the binary directly
+    curl -fsSL "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server" -o /etc/slowdns/dnstt-server
+    if [ $? -eq 0 ]; then
+        chmod +x /etc/slowdns/dnstt-server
+        SLOWDNS_BINARY="/etc/slowdns/dnstt-server"
+        print_success "SlowDNS binary downloaded directly"
+    else
+        print_error "Failed to download SlowDNS binary!"
+        exit 1
+    fi
 fi
 
 # Download key files
