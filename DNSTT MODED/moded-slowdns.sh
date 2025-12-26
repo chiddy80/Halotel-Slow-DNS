@@ -1,8 +1,9 @@
+
 #!/bin/bash
 set -e
 
 ##################################
-# SlowDNS + dnsdist (Debian 12+)
+# SlowDNS + dnsdist (Debian 12 / dnsdist 1.7)
 ##################################
 
 if [ "$EUID" -ne 0 ]; then
@@ -76,23 +77,22 @@ fuser -k 53/udp || true
 fuser -k 53/tcp || true
 
 ##################################
-# dnsdist (Debian 12 syntax)
+# dnsdist (1.7-compatible)
 ##################################
 cat > /etc/dnsdist/dnsdist.conf << 'EOF'
 setLocal("0.0.0.0:53")
 
 newServer({address="127.0.0.1:5300", name="slowdns"})
 
-setMaxUDPOutstanding(8192)
+setMaxUDPOutstanding(4096)
 setUDPSocketBuffer(8388608)
 
--- Allow ~50 active users per IP
-addAction(MaxQPSIPRule(50,5), DropAction())
+-- Limit abuse (~50 users per IP)
+addAction(MaxQPSIPRule(50), DropAction())
 
--- Drop malformed packets
-addAction(NotRule(DNSHeaderRule()), DropAction())
+-- Drop malformed DNS packets
+addAction(NotRule(DNSOpcodeRule(0)), DropAction())
 
--- Fast cleanup of dead tunnels
 setTCPRecvTimeout(2)
 setTCPSendTimeout(2)
 setUDPTimeout(2)
@@ -119,11 +119,11 @@ sleep 2
 systemctl restart dnsdist
 
 ##################################
-# Done
+# Status
 ##################################
 echo ""
 echo "=============================="
-echo "  SlowDNS + dnsdist ONLINE"
+echo " SlowDNS + dnsdist ONLINE"
 echo "=============================="
 echo "Server IP : $SERVER_IP"
 echo "DNS Port  : 53"
