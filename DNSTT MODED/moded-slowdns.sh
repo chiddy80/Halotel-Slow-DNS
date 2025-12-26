@@ -4,9 +4,12 @@
 #                     SLOWDNS PROFESSIONAL INSTALLER
 # ============================================================================
 
-# Local License Files (CHANGED HERE)
-KEY_FILE="/etc/halotel/keys.txt"
-IP_FILE="/etc/halotel/ips.txt"
+# Configuration
+GITHUB_BASE="https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED"
+VALID_KEYS_URL="$GITHUB_BASE/Valid_Keys.txt"
+ALLOWED_IPS_URL="$GITHUB_BASE/Allowips.text"
+MAX_ATTEMPTS=3
+LOG_FILE="/var/log/slowdns.log"
 
 # Colors
 RED='\033[0;31m'
@@ -68,24 +71,62 @@ get_vps_ip() {
     echo "$ip"
 }
 
+fetch_from_github() {
+    curl -s --max-time 5 "$1" 2>/dev/null
+}
+
+check_ip_allowed() {
+    local current_ip="$1"
+    local allowed_ips=$(fetch_from_github "$ALLOWED_IPS_URL")
+    
+    if [ $? -ne 0 ]; then
+        print_error "Cannot fetch allowed IPs list"
+        return 2
+    fi
+    
+    local clean_list=$(echo "$allowed_ips" | grep -v '^#' | grep -v '^$' | tr -d '[]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    
+    if echo "$clean_list" | grep -q "^$current_ip$"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+validate_license_key() {
+    local license_key="$1"
+    local valid_keys=$(fetch_from_github "$VALID_KEYS_URL")
+    
+    if [ $? -ne 0 ]; then
+        print_error "Cannot fetch license keys"
+        return 2
+    fi
+    
+    local clean_keys=$(echo "$valid_keys" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    
+    if echo "$clean_keys" | grep -q "^$license_key$"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+read_hidden() {
+    stty -echo
+    read value
+    stty echo
+    echo
+    echo "$value"
+}
+
 # ============================================================================
-# License Check Function (CHANGED HERE)
+# License Check Function
 # ============================================================================
 check_license() {
     print_header
     
     echo -e "${WHITE}═════════════ LICENSE VERIFICATION ═════════════${NC}"
     echo ""
-    
-    # Check if license files exist
-    if [ ! -f "$KEY_FILE" ] || [ ! -f "$IP_FILE" ]; then
-        print_error "License system files not found"
-        print_warning "Required: $KEY_FILE and $IP_FILE"
-        exit 1
-    fi
-    
-    # Secure permissions
-    chmod 600 "$KEY_FILE" "$IP_FILE" 2>/dev/null
     
     # Get VPS IP
     print_info "Checking VPS IP..."
@@ -99,9 +140,9 @@ check_license() {
     echo -e "${CYAN}VPS IP: ${WHITE}$CURRENT_IP${NC}"
     print_line
     
-    # Check IP authorization from local file
+    # Check IP authorization
     print_info "Checking IP authorization..."
-    if ! grep -Fxq "$CURRENT_IP" "$IP_FILE" 2>/dev/null; then
+    if ! check_ip_allowed "$CURRENT_IP"; then
         print_error "VPS IP not authorized"
         echo ""
         print_warning "Contact admin to whitelist your IP"
@@ -112,26 +153,19 @@ check_license() {
     print_success "IP authorized"
     echo ""
     
-    # License verification from local file
+    # License verification
     echo -e "${WHITE}════════════ LICENSE KEY REQUIRED ═════════════${NC}"
     echo ""
     print_info "Get license key from: @esimfreegb"
     echo ""
     
     local attempts=0
-    local MAX_ATTEMPTS=3
-    
     while [ $attempts -lt $MAX_ATTEMPTS ]; do
         attempts=$((attempts + 1))
         
         echo -e "${CYAN}Attempt ${WHITE}$attempts${CYAN} of ${WHITE}$MAX_ATTEMPTS${NC}"
         echo -ne "${YELLOW}Enter license key: ${NC}"
-        
-        # Read hidden input
-        stty -echo
-        read LICENSE_KEY
-        stty echo
-        echo ""
+        LICENSE_KEY=$(read_hidden)
         
         if [ -z "$LICENSE_KEY" ]; then
             print_error "License key cannot be empty"
@@ -143,8 +177,7 @@ check_license() {
         
         print_info "Verifying license..."
         
-        # Check license key from local file
-        if grep -Fxq "$LICENSE_KEY" "$KEY_FILE" 2>/dev/null; then
+        if validate_license_key "$LICENSE_KEY"; then
             echo ""
             print_success "✓ License verified successfully"
             print_success "✓ Starting installation..."
@@ -171,7 +204,7 @@ check_license() {
 }
 
 # ============================================================================
-# Installation Functions (UNCHANGED)
+# Installation Functions
 # ============================================================================
 configure_openssh() {
     print_info "Configuring OpenSSH..."
@@ -217,12 +250,12 @@ install_slowdns() {
     cd /etc/slowdns
     
     # Download binary
-    wget -q -O dnstt-server "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server"
+    wget -q -O dnstt-server "$GITHUB_BASE/dnstt-server"
     chmod +x dnstt-server
     
     # Download keys
-    wget -q -O server.key "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key"
-    wget -q -O server.pub "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub"
+    wget -q -O server.key "$GITHUB_BASE/server.key"
+    wget -q -O server.pub "$GITHUB_BASE/server.pub"
     
     print_success "SlowDNS components downloaded"
 }
@@ -513,6 +546,10 @@ main() {
         print_error "Run as root: sudo bash $0"
         exit 1
     fi
+    
+    # Create log file
+    mkdir -p /var/log 2>/dev/null
+    touch "$LOG_FILE" 2>/dev/null
     
     # Run license check
     check_license
