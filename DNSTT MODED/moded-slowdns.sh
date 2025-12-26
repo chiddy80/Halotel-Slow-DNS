@@ -4,12 +4,32 @@
 #                     SLOWDNS PROFESSIONAL INSTALLER
 # ============================================================================
 
+#!/bin/bash
+
 # Configuration
-GITHUB_BASE="https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED"
-VALID_KEYS_URL="$GITHUB_BASE/Valid_Keys.txt"
-ALLOWED_IPS_URL="$GITHUB_BASE/Allowips.text"
+KEY_FILE="/etc/halotel/keys.txt"
+IP_FILE="/etc/halotel/ips.txt"
 MAX_ATTEMPTS=3
 LOG_FILE="/var/log/slowdns.log"
+
+# --- Server authorization ---
+MYIP=$(curl -s ifconfig.me)
+
+if [ ! -f "$KEY_FILE" ]; then
+  echo "License file missing"
+  exit 1
+fi
+
+if [ ! -f "$IP_FILE" ]; then
+  echo "IP whitelist missing"
+  exit 1
+fi
+
+if ! grep -q "$MYIP" "$IP_FILE"; then
+  echo "This server is not authorized"
+  exit 1
+fi
+# --- End authorization ---
 
 # Colors
 RED='\033[0;31m'
