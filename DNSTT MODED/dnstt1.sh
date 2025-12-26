@@ -1,53 +1,156 @@
-#!/bin/bash
+package main
 
-# Ensure running as root
-if [ "$EUID" -ne 0 ]; then
-    echo "[✗] Please run this script as root"
-    exit 1
-fi
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"sync"
+	"syscall"
+	"time"
+)
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+// ---------------- CONFIG ----------------
+const (
+	DEFAULT_NAMESERVER   = "dns.example.com"
+	SLOWDNS_DIR          = "/etc/slowdns"
+	LISTEN_PORT          = 5300
+	SSH_PORT             = 22
+	EDNS_EXTERNAL_SIZE   = 512
+	EDNS_INTERNAL_SIZE   = 1800
+	MAX_PACKET_SIZE      = 4096
+	WORKERS              = 128
+	UPSTREAM_TIMEOUT     = 3 * time.Second
+	SERVER_KEY_URL       = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key"
+	SERVER_PUB_URL       = "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub"
+)
 
-# SSH Port Configuration
-SSHD_PORT=22
-SLOWDNS_PORT=5300
-
-# Prompt user for nameserver
-read -p "Enter nameserver (default: dns.example.com): " NAMESERVER
-NAMESERVER=${NAMESERVER:-dns.example.com}
-
-# Functions
-print_success() {
-    echo -e "${GREEN}[✓]${NC} $1"
+// ---------------- TYPES ----------------
+type packet struct {
+	data []byte
+	addr *net.UDPAddr
 }
 
-print_error() {
-    echo -e "${RED}[✗]${NC} $1"
+// ---------------- EDNS PATCH ----------------
+func patchEDNS(data []byte, size uint16) []byte {
+	if len(data) < 12 {
+		return data
+	}
+	arcount := binary.BigEndian.Uint16(data[10:12])
+	if arcount == 0 {
+		return data
+	}
+	offset := 12
+	skipName := func(buf []byte, off int) int {
+		for off < len(buf) {
+			l := buf[off]
+			off++
+			if l == 0 {
+				break
+			}
+			if l&0xC0 == 0xC0 {
+				off++
+				break
+			}
+			off += int(l)
+		}
+		return off
+	}
+	qdcount := binary.BigEndian.Uint16(data[4:6])
+	for i := 0; i < int(qdcount); i++ {
+		offset = skipName(data, offset) + 4
+		if offset >= len(data) {
+			return data
+		}
+	}
+	out := make([]byte, len(data))
+	copy(out, data)
+	for i := 0; i < int(arcount); i++ {
+		offset = skipName(data, offset)
+		if offset+10 > len(data) {
+			return data
+		}
+		rtype := binary.BigEndian.Uint16(data[offset : offset+2])
+		if rtype == 41 {
+			binary.BigEndian.PutUint16(out[offset+2:offset+4], size)
+			return out
+		}
+		rdlen := binary.BigEndian.Uint16(data[offset+8 : offset+10])
+		offset += 10 + int(rdlen)
+	}
+	return data
 }
 
-print_warning() {
-    echo -e "${YELLOW}[!]${NC} $1"
+// ---------------- WORKER ----------------
+func worker(wg *sync.WaitGroup, in <-chan packet, listener *net.UDPConn, nameserver string) {
+	defer wg.Done()
+	buf := make([]byte, MAX_PACKET_SIZE)
+	for pkt := range in {
+		upConn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.ParseIP(nameserver), Port: LISTEN_PORT})
+		if err != nil {
+			continue
+		}
+		upConn.SetDeadline(time.Now().Add(UPSTREAM_TIMEOUT))
+		_, err = upConn.Write(patchEDNS(pkt.data, EDNS_INTERNAL_SIZE))
+		if err != nil {
+			upConn.Close()
+			continue
+		}
+		n, _, err := upConn.ReadFromUDP(buf)
+		if err != nil {
+			upConn.Close()
+			continue
+		}
+		upConn.Close()
+		resp := patchEDNS(buf[:n], EDNS_EXTERNAL_SIZE)
+		listener.WriteToUDP(resp, pkt.addr)
+	}
 }
 
-echo "Starting OpenSSH SlowDNS Installation..."
+// ---------------- UTILS ----------------
+func runCommand(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
 
-# Get Server IP
-SERVER_IP=$(curl -s ifconfig.me)
-if [ -z "$SERVER_IP" ]; then
-    SERVER_IP=$(hostname -I | awk '{print $1}')
-fi
+func downloadFile(url, dest string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	out, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, resp.Body)
+	return err
+}
 
-# Configure OpenSSH
-echo "Configuring OpenSSH on port $SSHD_PORT..."
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup 2>/dev/null
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
 
-cat > /etc/ssh/sshd_config << EOF
-# OpenSSH Configuration
-Port $SSHD_PORT
+// ---------------- SSH & FIREWALL ----------------
+func setupSSH(port int) error {
+	fmt.Printf("[*] Configuring OpenSSH on port %d...\n", port)
+	if !fileExists("/etc/ssh/sshd_config.bak") {
+		if err := runCommand("cp", "/etc/ssh/sshd_config", "/etc/ssh/sshd_config.bak"); err != nil {
+			return err
+		}
+	}
+	conf := fmt.Sprintf(`
+Port %d
 Protocol 2
 PermitRootLogin yes
 PubkeyAuthentication yes
@@ -69,145 +172,138 @@ MaxSessions 100
 MaxStartups 100:30:200
 LoginGraceTime 30
 UseDNS no
-EOF
+`, port)
+	if err := os.WriteFile("/etc/ssh/sshd_config", []byte(conf), 0600); err != nil {
+		return err
+	}
+	return runCommand("systemctl", "restart", "sshd")
+}
 
-systemctl restart sshd
-sleep 2
-print_success "OpenSSH configured on port $SSHD_PORT with key-based authentication only"
+func setupFirewall(sshPort, dnsPort int) error {
+	fmt.Println("[*] Setting up iptables rules...")
+	commands := [][]string{
+		{"iptables", "-F"},
+		{"iptables", "-X"},
+		{"iptables", "-t", "nat", "-F"},
+		{"iptables", "-t", "nat", "-X"},
+		{"iptables", "-P", "INPUT", "ACCEPT"},
+		{"iptables", "-P", "FORWARD", "ACCEPT"},
+		{"iptables", "-P", "OUTPUT", "ACCEPT"},
+		{"iptables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"},
+		{"iptables", "-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"},
+		{"iptables", "-A", "INPUT", "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
+		{"iptables", "-A", "INPUT", "-p", "tcp", "--dport", fmt.Sprintf("%d", sshPort), "-j", "ACCEPT"},
+		{"iptables", "-A", "INPUT", "-p", "udp", "--dport", fmt.Sprintf("%d", dnsPort), "-j", "ACCEPT"},
+		{"iptables", "-A", "INPUT", "-p", "tcp", "--dport", fmt.Sprintf("%d", dnsPort), "-j", "ACCEPT"},
+		{"iptables", "-A", "INPUT", "-p", "icmp", "-j", "ACCEPT"},
+	}
+	for _, cmd := range commands {
+		if err := runCommand(cmd[0], cmd[1:]...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-# Setup SlowDNS
-echo "Setting up SlowDNS..."
-rm -rf /etc/slowdns
-mkdir -p /etc/slowdns
-print_success "SlowDNS directory created"
+func disableIPv6() error {
+	fmt.Println("[*] Disabling IPv6...")
+	if err := os.WriteFile("/proc/sys/net/ipv6/conf/all/disable_ipv6", []byte("1"), 0644); err != nil {
+		return err
+	}
+	return runCommand("sysctl", "-w", "net.ipv6.conf.all.disable_ipv6=1")
+}
 
-# Download files
-echo "Downloading SlowDNS files..."
-wget -q -O /etc/slowdns/server.key "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key" && print_success "server.key downloaded"
-wget -q -O /etc/slowdns/server.pub "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub" && print_success "server.pub downloaded"
-wget -q -O /etc/slowdns/sldns-server "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server" && print_success "dnstt-server downloaded"
+// ---------------- MAIN ----------------
+func main() {
+	if os.Geteuid() != 0 {
+		fmt.Println("[✗] Please run as root")
+		return
+	}
 
-chmod +x /etc/slowdns/sldns-server
-print_success "File permissions set"
+	nameserver := ""
+	fmt.Printf("Enter nameserver (default: %s): ", DEFAULT_NAMESERVER)
+	fmt.Scanln(&nameserver)
+	if nameserver == "" {
+		nameserver = DEFAULT_NAMESERVER
+	}
 
-# Create SlowDNS service with MTU 1800
-echo "Creating SlowDNS service..."
-cat > /etc/systemd/system/server-sldns.service << EOF
-[Unit]
-Description=SlowDNS Server
-After=network.target sshd.service
+	fmt.Println("[✓] Starting SlowDNS Installer + Proxy...")
 
-[Service]
-Type=simple
-ExecStart=/etc/slowdns/sldns-server -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
-Restart=always
-RestartSec=5
-User=root
+	// SSH setup
+	if err := setupSSH(SSH_PORT); err != nil {
+		log.Fatalf("[✗] SSH setup failed: %v", err)
+	}
+	fmt.Println("[✓] SSH configured")
 
-[Install]
-WantedBy=multi-user.target
-EOF
+	// Firewall
+	if err := setupFirewall(SSH_PORT, LISTEN_PORT); err != nil {
+		log.Fatalf("[✗] Firewall setup failed: %v", err)
+	}
+	fmt.Println("[✓] Firewall configured")
 
-print_success "Service file created"
+	// Disable IPv6
+	if err := disableIPv6(); err != nil {
+		log.Fatalf("[✗] IPv6 disable failed: %v", err)
+	}
+	fmt.Println("[✓] IPv6 disabled")
 
-# Startup config with ALL iptables
-echo "Setting up startup configuration..."
-cat > /etc/rc.local <<-END
-#!/bin/sh -e
-systemctl start sshd
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
-iptables -P OUTPUT ACCEPT
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A OUTPUT -o lo -j ACCEPT
-iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -p tcp --dport $SSHD_PORT -j ACCEPT
-iptables -A INPUT -p udp --dport $SLOWDNS_PORT -j ACCEPT
-iptables -A INPUT -p tcp --dport $SLOWDNS_PORT -j ACCEPT
-iptables -A OUTPUT -p udp --dport $SLOWDNS_PORT -j ACCEPT
-iptables -A INPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT
-iptables -A OUTPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT
-iptables -A INPUT -p icmp -j ACCEPT
-iptables -A OUTPUT -j ACCEPT
-iptables -A INPUT -m state --state INVALID -j DROP
-iptables -A INPUT -p tcp --dport $SSHD_PORT -m state --state NEW -m recent --set
-iptables -A INPUT -p tcp --dport $SSHD_PORT -m state --state NEW -m recent --update --seconds 60 --hitcount 4 -j DROP
-echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-sysctl -w net.core.rmem_max=134217728 > /dev/null 2>&1
-sysctl -w net.core.wmem_max=134217728 > /dev/null 2>&1
-exit 0
-END
+	// Create SlowDNS directory
+	if !fileExists(SLOWDNS_DIR) {
+		if err := os.MkdirAll(SLOWDNS_DIR, 0755); err != nil {
+			log.Fatalf("[✗] Failed to create directory: %v", err)
+		}
+	}
 
-chmod +x /etc/rc.local
-systemctl enable rc-local > /dev/null 2>&1
-systemctl start rc-local.service > /dev/null 2>&1
-print_success "Startup configuration set"
+	// Download keys
+	fmt.Println("[*] Downloading server.key and server.pub...")
+	if err := downloadFile(SERVER_KEY_URL, filepath.Join(SLOWDNS_DIR, "server.key")); err != nil {
+		log.Fatalf("[✗] Failed to download server.key: %v", err)
+	}
+	if err := downloadFile(SERVER_PUB_URL, filepath.Join(SLOWDNS_DIR, "server.pub")); err != nil {
+		log.Fatalf("[✗] Failed to download server.pub: %v", err)
+	}
+	fmt.Println("[✓] Keys downloaded")
 
-# Disable IPv6
-echo "Disabling IPv6..."
-echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null 2>&1
-echo "net.ipv6.conf.all.disable_ipv6 = 1" >> /etc/sysctl.conf
-echo "net.ipv6.conf.default.disable_ipv6 = 1" >> /etc/sysctl.conf
-sysctl -p > /dev/null 2>&1
-print_success "IPv6 disabled"
+	// Start SlowDNS/EDNS Proxy
+	laddr := &net.UDPAddr{IP: net.IPv4zero, Port: LISTEN_PORT}
+	listener, err := net.ListenUDP("udp", laddr)
+	if err != nil {
+		log.Fatalf("[✗] Failed to bind UDP port %d: %v", LISTEN_PORT, err)
+	}
+	defer listener.Close()
+	fmt.Printf("[✓] SlowDNS Proxy listening on UDP port %d\n", LISTEN_PORT)
 
-# Start SlowDNS service
-echo "Starting SlowDNS service..."
-pkill sldns-server 2>/dev/null
-systemctl daemon-reload
-systemctl enable server-sldns > /dev/null 2>&1
-systemctl start server-sldns
-sleep 3
+	jobs := make(chan packet, 1024)
+	var wg sync.WaitGroup
+	for i := 0; i < WORKERS; i++ {
+		wg.Add(1)
+		go worker(&wg, jobs, listener, nameserver)
+	}
 
-if systemctl is-active --quiet server-sldns; then
-    print_success "SlowDNS service started"
-    
-    echo "Testing DNS functionality..."
-    sleep 2
-    
-    if timeout 3 bash -c "echo > /dev/udp/127.0.0.1/$SLOWDNS_PORT" 2>/dev/null; then
-        print_success "SlowDNS is listening on port $SLOWDNS_PORT"
-    else
-        print_warning "SlowDNS not responding on port $SLOWDNS_PORT"
-    fi
-else
-    print_error "SlowDNS service failed to start"
-    
-    # Try direct start with MTU 1800
-    pkill sldns-server 2>/dev/null
-    /etc/slowdns/sldns-server -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT &
-    sleep 2
-    
-    if pgrep -x "sldns-server" > /dev/null; then
-        print_success "SlowDNS started directly"
-    else
-        print_error "Failed to start SlowDNS"
-    fi
-fi
+	// Graceful shutdown
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		fmt.Println("[!] Shutting down...")
+		close(jobs)
+		listener.Close()
+	}()
 
-# Clean up packages (no sudo)
-apt-get remove -y libpam-pwquality 2>/dev/null || true
-print_success "Packages cleaned"
+	buf := make([]byte, MAX_PACKET_SIZE)
+	for {
+		n, addr, err := listener.ReadFromUDP(buf)
+		if err != nil {
+			break
+		}
+		data := make([]byte, n)
+		copy(data, buf[:n])
+		select {
+		case jobs <- packet{data: data, addr: addr}:
+		default:
+		}
+	}
 
-# Test connection
-echo "Testing SSH connection..."
-if timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/$SSHD_PORT" 2>/dev/null; then
-    print_success "SSH port $SSHD_PORT is accessible"
-else
-    print_error "SSH port $SSHD_PORT is not accessible"
-fi
-
-echo ""
-print_success "OpenSSH SlowDNS Installation Completed!"
-echo ""
-echo "Server IP: $SERVER_IP"
-echo "SSH Port: $SSHD_PORT"
-echo "SlowDNS Port: $SLOWDNS_PORT"
-echo "MTU: 1800"
-echo ""
-echo "Note: SlowDNS is running on port $SLOWDNS_PORT"
+	wg.Wait()
+	fmt.Println("[✓] SlowDNS Proxy stopped gracefully")
+}
