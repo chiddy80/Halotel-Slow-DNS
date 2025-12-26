@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║                     FAST DNS  DEVELOPER SCRIPT                                ║
-# ║                     PATCHED HIGH SPEED VERISON                                ║
-# ╚═══════════════════════════════════════════════════════════════════╝
+# ╔═══════════════════════════════════════════════════════════════════════════════════╗
+# ║                     SLOWDNS PROFESSIONAL INSTALLER v3.2.1                        ║
+# ║                          ──────────────────────────────                           ║
+# ║                Enterprise-Grade DNS Tunneling Solution                           ║
+# ╚═══════════════════════════════════════════════════════════════════════════════════╝
 #
 #  ███████╗██╗      ██████╗ ██╗    ██╗██████╗ ███╗   ██╗███████╗
 #  ██╔════╝██║     ██╔═══██╗██║    ██║██╔══██╗████╗  ██║██╔════╝
@@ -12,7 +13,7 @@
 #  ███████║███████╗╚██████╔╝╚███╔███╔╝██████╔╝██║ ╚████║███████║
 #  ╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
 #
-#  🌍 MRCHIDDY ESIMFREEGB | ⌛ FAST DNS HALOTEL | ⚡ CONTACT ADMIN
+#                 🌍 MRCHIDDY ESIMFREEGB | ⌛ FAST DNS HALOTEL
 
 # ============================================================================
 #                             SYSTEM CONFIGURATION
@@ -67,24 +68,36 @@ log() {
 print_header() {
     clear
     echo -e "${PRIMARY}"
-    echo "    ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄"
-    echo "    █${BOLD}                                                      ${RESET}${PRIMARY}█"
-    echo "    █${BOLD}  ╔═╗╦  ╔═╗╔╗ ╔═╗╔╦╗╔═╗╔═╗╔═╗  ╔═╗╔═╗╔═╗╦╔═╔═╗╦═╗  ${RESET}${PRIMARY}█"
-    echo "    █${BOLD}  ╠═╝║  ║ ║╠╩╗╠═╣ ║║╠═╣║  ╚═╗  ╚═╗║╣ ╠═╝╠╩╗║╣ ╠╦╝  ${RESET}${PRIMARY}█"
-    echo "    █${BOLD}  ╩  ╩═╝╚═╝╚═╝╩ ╩═╩╝╩ ╩╚═╝╚═╝  ╚═╝╚═╝╩  ╩ ╩╚═╝╩╚═  ${RESET}${PRIMARY}█"
-    echo "    █${BOLD}                                                      ${RESET}${PRIMARY}█"
-    echo "    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀"
+    echo "    ╔════════════════════════════════════════════════════════════════════╗"
+    echo "    ║                                                                    ║"
+    echo "    ║    ███████╗██╗      ██████╗ ██╗    ██╗██████╗ ███╗   ██╗███████╗   ║"
+    echo "    ║    ██╔════╝██║     ██╔═══██╗██║    ██║██╔══██╗████╗  ██║██╔════╝   ║"
+    echo "    ║    ███████╗██║     ██║   ██║██║ █╗ ██║██║  ██║██╔██╗ ██║███████╗   ║"
+    echo "    ║    ╚════██║██║     ██║   ██║██║███╗██║██║  ██║██║╚██╗██║╚════██║   ║"
+    echo "    ║    ███████║███████╗╚██████╔╝╚███╔███╔╝██████╔╝██║ ╚████║███████║   ║"
+    echo "    ║    ╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ║"
+    echo "    ║                                                                    ║"
+    echo "    ║               P R O F E S S I O N A L   E D I T I O N              ║"
+    echo "    ║                                                                    ║"
+    echo "    ╚════════════════════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
-    echo -e "${INFO}${BOLD}           Professional SlowDNS Tunnel System${RESET}"
-    echo -e "${DIM}                    Optimized for Maximum Performance${RESET}"
     echo ""
-    echo -e "${SECONDARY}${BOLD}   🌍 MRCHIDDY ESIMFREEGB  ${DIM}|${RESET} ${SUCCESS}${BOLD}⌛ FAST DNS HALOTEL  ${DIM}|${RESET} ${WARNING}${BOLD}⚡ CONTACT ADMIN${RESET}"
+    echo -e "${INFO}${BOLD}           SlowDNS Tunnel System - Professional Edition${RESET}"
+    echo -e "${DIM}                    Optimized for Maximum Performance & Security${RESET}"
+    echo ""
+    echo -e "${SECONDARY}${BOLD}        🌍 MRCHIDDY ESIMFREEGB  ${DIM}│${RESET} ${SUCCESS}${BOLD}⌛ FAST DNS HALOTEL${RESET}"
+    echo -e "${WARNING}${BOLD}                     ⚡ Contact: @esimfreegb${RESET}"
+    echo ""
+    echo -e "${DIM}${LINE}${RESET}"
     echo ""
 }
 
 print_section() {
+    echo ""
     echo -e "${PRIMARY}${BOLD}╔════════════════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${PRIMARY}${BOLD}║${RESET} ${HIGHLIGHT}${BOLD}$1${RESET}"
+    echo -e "${PRIMARY}${BOLD}║                                                                    ║${RESET}"
+    echo -e "${PRIMARY}${BOLD}║  ${HIGHLIGHT}${BOLD}$1${RESET}"
+    echo -e "${PRIMARY}${BOLD}║                                                                    ║${RESET}"
     echo -e "${PRIMARY}${BOLD}╚════════════════════════════════════════════════════════════════════╝${RESET}"
     echo ""
 }
@@ -102,7 +115,7 @@ print_status() {
 spinner() {
     local pid=$1
     local delay=0.1
-    local spinstr='|/-\'
+    local spinstr='⣷⣯⣟⡿⢿⣻⣽⣾'
     while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
         local temp=${spinstr#?}
         printf " [%c]  " "$spinstr"
@@ -125,14 +138,20 @@ get_vps_ip() {
         "https://ipinfo.io/ip"
     )
     
+    echo -ne "${INFO}Detecting public IP address "
     for service in "${services[@]}"; do
         ip=$(curl -s --max-time 2 "$service" 2>/dev/null)
         if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo -e "${SUCCESS}${CHECK}${RESET}"
+            echo -e "  ${DIM}Found via: $service${RESET}"
             echo "$ip"
             return 0
         fi
+        echo -ne "."
+        sleep 0.3
     done
     
+    echo -e "${ERROR}${CROSS}${RESET}"
     print_status error "Failed to detect public IP"
     return 1
 }
@@ -164,33 +183,46 @@ check_ip_authorization() {
     fi
     
     echo -e "${INFO}Detected Public IP: ${BOLD}$current_ip${RESET}"
+    echo ""
     
+    echo -ne "${INFO}Checking authorization list "
     local allowed_ips=$(fetch_github_content "$ALLOWED_IPS_URL")
     if [ $? -ne 0 ]; then
+        echo -e "${ERROR}${CROSS}${RESET}"
         print_status error "Cannot fetch authorization list"
         return 1
     fi
+    echo -e "${SUCCESS}${CHECK}${RESET}"
     
     local clean_list=$(echo "$allowed_ips" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
     if echo "$clean_list" | grep -q "^$current_ip$"; then
-        print_status success "VPS authorized for installation"
-        echo -e "${DIM}${LINE}${RESET}\n"
+        echo ""
+        echo -e "${SUCCESS}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
+        echo -e "${SUCCESS}${BOLD}║                       AUTHORIZATION GRANTED                   ║${RESET}"
+        echo -e "${SUCCESS}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
+        echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
+        echo -e "${SUCCESS}${BOLD}║  ✅ VPS IP: $current_ip                                 ║${RESET}"
+        echo -e "${SUCCESS}${BOLD}║  ✅ Status: Authorized for installation                     ║${RESET}"
+        echo -e "${SUCCESS}${BOLD}║  ✅ Timestamp: $(date '+%Y-%m-%d %H:%M:%S')                      ║${RESET}"
+        echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
+        echo -e "${SUCCESS}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
+        echo ""
         return 0
     else
-        print_status error "VPS not authorized"
-        echo -e "${WARNING}"
-        echo "╔══════════════════════════════════════════════════════╗"
-        echo "║           LICENSE REQUIRED - CONTACT ADMIN           ║"
-        echo "╠══════════════════════════════════════════════════════╣"
-        echo "║                                                      ║"
-        echo "║  Telegram: @esimfreegb                               ║"
-        echo "║                                                      ║"
-        echo "║  Provide your VPS IP to administrator:               ║"
-        echo "║  ${BOLD}$current_ip${RESET}${WARNING}                          ║"
-        echo "║                                                      ║"
-        echo "╚══════════════════════════════════════════════════════╝"
-        echo -e "${RESET}"
+        echo ""
+        echo -e "${ERROR}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
+        echo -e "${ERROR}${BOLD}║                    AUTHORIZATION REQUIRED                    ║${RESET}"
+        echo -e "${ERROR}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
+        echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
+        echo -e "${ERROR}${BOLD}║  ❌ VPS IP: $current_ip                                 ║${RESET}"
+        echo -e "${ERROR}${BOLD}║  ❌ Status: Not authorized                                   ║${RESET}"
+        echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
+        echo -e "${ERROR}${BOLD}║  Contact administrator to whitelist your IP:                 ║${RESET}"
+        echo -e "${ERROR}${BOLD}║  Telegram: @esimfreegb                                       ║${RESET}"
+        echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
+        echo -e "${ERROR}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
+        echo ""
         return 1
     fi
 }
@@ -201,6 +233,7 @@ validate_license() {
     while [ $attempts -lt $MAX_ATTEMPTS ]; do
         attempts=$((attempts + 1))
         
+        echo ""
         echo -e "${INFO}${BOLD}License Verification (Attempt $attempts/$MAX_ATTEMPTS)${RESET}"
         echo -e "${DIM}${LINE}${RESET}"
         
@@ -218,9 +251,9 @@ validate_license() {
         
         license_key=$(echo "$license_key" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
         
-        echo -ne "${INFO}Verifying license ${ROCKET}"
-        for i in {1..10}; do
-            echo -ne "."
+        echo -ne "${INFO}Verifying license key "
+        for i in {1..15}; do
+            echo -ne "${ROCKET}"
             sleep 0.1
         done
         echo -e "${RESET}"
@@ -228,44 +261,49 @@ validate_license() {
         local valid_keys=$(fetch_github_content "$VALID_KEYS_URL")
         if [ $? -ne 0 ]; then
             print_status error "Cannot connect to license server"
+            echo ""
             continue
         fi
         
         local clean_keys=$(echo "$valid_keys" | grep -v '^#' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         
         if echo "$clean_keys" | grep -q "^$license_key$"; then
-            echo -e "${SUCCESS}"
-            echo "╔══════════════════════════════════════════════════════╗"
-            echo "║              LICENSE VALIDATION SUCCESS              ║"
-            echo "╠══════════════════════════════════════════════════════╣"
-            echo "║                                                      ║"
-            echo "║  ${CHECK} License Activated Successfully               ║"
-            echo "║  ${CLOCK} Valid Until: Unlimited                       ║"
-            echo "║  ${NETWORK} Status: Active                               ║"
-            echo "║                                                      ║"
-            echo "╚══════════════════════════════════════════════════════╝"
-            echo -e "${RESET}"
+            echo ""
+            echo -e "${SUCCESS}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
+            echo -e "${SUCCESS}${BOLD}║                    LICENSE VALIDATION SUCCESS                ║${RESET}"
+            echo -e "${SUCCESS}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
+            echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
+            echo -e "${SUCCESS}${BOLD}║  ✅ License Key: $(echo $license_key | cut -c1-20)...             ║${RESET}"
+            echo -e "${SUCCESS}${BOLD}║  ✅ Validation: Successful                                   ║${RESET}"
+            echo -e "${SUCCESS}${BOLD}║  ✅ Expiry: Unlimited                                        ║${RESET}"
+            echo -e "${SUCCESS}${BOLD}║  ✅ Activation: $(date '+%Y-%m-%d %H:%M:%S')                      ║${RESET}"
+            echo -e "${SUCCESS}${BOLD}║                                                              ║${RESET}"
+            echo -e "${SUCCESS}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
+            echo ""
             return 0
         else
             print_status error "Invalid license key"
             
             if [ $attempts -lt $MAX_ATTEMPTS ]; then
-                echo -e "${WARNING}Remaining attempts: $((MAX_ATTEMPTS - attempts))${RESET}\n"
+                echo -e "${WARNING}Remaining attempts: $((MAX_ATTEMPTS - attempts))${RESET}"
+                echo ""
             fi
         fi
     done
     
-    print_status error "Maximum verification attempts reached"
-    echo -e "${ERROR}"
-    echo "╔══════════════════════════════════════════════════════╗"
-    echo "║               VERIFICATION FAILED                    ║"
-    echo "╠══════════════════════════════════════════════════════╣"
-    echo "║                                                      ║"
-    echo "║  Contact administrator for assistance:               ║"
-    echo "║  Telegram: @esimfreegb                               ║"
-    echo "║                                                      ║"
-    echo "╚══════════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
+    echo ""
+    echo -e "${ERROR}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${ERROR}${BOLD}║               MAXIMUM ATTEMPTS REACHED                      ║${RESET}"
+    echo -e "${ERROR}${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
+    echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
+    echo -e "${ERROR}${BOLD}║  ❌ License verification failed                              ║${RESET}"
+    echo -e "${ERROR}${BOLD}║  ❌ Maximum attempts: $MAX_ATTEMPTS                                 ║${RESET}"
+    echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
+    echo -e "${ERROR}${BOLD}║  Contact support for assistance:                             ║${RESET}"
+    echo -e "${ERROR}${BOLD}║  Telegram: @esimfreegb                                       ║${RESET}"
+    echo -e "${ERROR}${BOLD}║                                                              ║${RESET}"
+    echo -e "${ERROR}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
     return 1
 }
 
@@ -278,6 +316,9 @@ configure_openssh() {
     
     SSHD_PORT=22
     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%s)
+    
+    echo -ne "${INFO}Backup created "
+    echo -e "${SUCCESS}${CHECK}${RESET}"
     
     cat > /etc/ssh/sshd_config << EOF
 # ===========================================
