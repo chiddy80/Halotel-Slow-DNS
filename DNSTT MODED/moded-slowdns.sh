@@ -12,7 +12,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# SSH Port Configuration
+# Port Configuration
 SSHD_PORT=22
 SLOWDNS_PORT=5300
 
@@ -83,14 +83,32 @@ rm -rf /etc/slowdns
 mkdir -p /etc/slowdns
 print_success "SlowDNS directory created"
 
-# Download files
-echo "Downloading SlowDNS files..."
+# Download SlowDNS files using moded-slowdns.sh
+echo "Downloading and installing SlowDNS via moded-slowdns.sh..."
+curl -fsSL "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded-slowdns.sh" -o /etc/slowdns/moded-slowdns.sh && chmod +x /etc/slowdns/moded-slowdns.sh && cd /etc/slowdns && ./moded-slowdns.sh
+
+# Find the SlowDNS binary
+if [ -f /usr/local/bin/dnstt-server ]; then
+    SLOWDNS_BINARY="/usr/local/bin/dnstt-server"
+elif [ -f /usr/bin/dnstt-server ]; then
+    SLOWDNS_BINARY="/usr/bin/dnstt-server"
+elif [ -f /bin/dnstt-server ]; then
+    SLOWDNS_BINARY="/bin/dnstt-server"
+else
+    SLOWDNS_BINARY=$(which dnstt-server || find / -name "dnstt-server" -type f 2>/dev/null | head -1)
+fi
+
+if [ -n "$SLOWDNS_BINARY" ] && [ -f "$SLOWDNS_BINARY" ]; then
+    print_success "SlowDNS binary found at: $SLOWDNS_BINARY"
+else
+    print_error "SlowDNS binary not found!"
+    exit 1
+fi
+
+# Download key files
+echo "Downloading key files..."
 wget -q -O /etc/slowdns/server.key "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key" && print_success "server.key downloaded"
 wget -q -O /etc/slowdns/server.pub "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub" && print_success "server.pub downloaded"
-wget -q -O /etc/slowdns/sldns-server "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server" && print_success "dnstt-server downloaded"
-
-chmod +x /etc/slowdns/sldns-server
-print_success "File permissions set"
 
 # Create SlowDNS service with MTU 1800
 echo "Creating SlowDNS service..."
@@ -101,7 +119,7 @@ After=network.target sshd.service
 
 [Service]
 Type=simple
-ExecStart=/etc/slowdns/sldns-server -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
+ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
 Restart=always
 RestartSec=5
 User=root
@@ -112,48 +130,58 @@ EOF
 
 print_success "Service file created"
 
-# EDNS Proxy Installation (C/epoll)
+# EDNS Proxy Installation (C/epoll) - FIXED VERSION
 echo "Installing EDNS Proxy (C/epoll)..."
 cat > /tmp/edns.c << 'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
+#include <time.h>
 
 #define EXT_EDNS 512
 #define INT_EDNS 1800
 #define SLOWDNS_PORT 5300
 #define LISTEN_PORT 53
+#define BUFFER_SIZE 4096
+#define MAX_EVENTS 100
 
 typedef struct {
     int client_fd;
     struct sockaddr_in client_addr;
     socklen_t addr_len;
+    time_t timestamp;
 } request_t;
 
+// Simple EDNS patching
 int patch_edns(unsigned char *buf, int len, int new_size) {
     if(len < 12) return len;
     
+    // Find OPT record (type 41) in additional section
     int offset = 12;
+    
+    // Skip questions
     int qdcount = (buf[4] << 8) | buf[5];
     for(int i = 0; i < qdcount && offset < len; i++) {
         while(offset < len && buf[offset]) offset++;
-        offset += 5;
+        offset += 5; // null byte + qtype + qclass
     }
     
+    // Find OPT (EDNS) record
     int arcount = (buf[10] << 8) | buf[11];
     for(int i = 0; i < arcount && offset < len; i++) {
-        if(buf[offset] == 0) {
+        if(buf[offset] == 0) { // root label
             if(offset + 4 < len) {
                 int type = (buf[offset+1] << 8) | buf[offset+2];
-                if(type == 41) {
+                if(type == 41) { // OPT record
                     buf[offset+3] = new_size >> 8;
                     buf[offset+4] = new_size & 0xFF;
-                    break;
+                    return len;
                 }
             }
         }
@@ -164,83 +192,154 @@ int patch_edns(unsigned char *buf, int len, int new_size) {
 
 int set_nonblock(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
+    if(flags < 0) return -1;
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 int main() {
+    // Create UDP socket for clients
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    set_nonblock(sock);
+    if(sock < 0) {
+        perror("socket");
+        return 1;
+    }
     
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(LISTEN_PORT),
-        .sin_addr.s_addr = INADDR_ANY
-    };
-    bind(sock, (struct sockaddr*)&addr, sizeof(addr));
+    // Set non-blocking
+    if(set_nonblock(sock) < 0) {
+        perror("fcntl");
+        close(sock);
+        return 1;
+    }
     
+    // Bind to port 53
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(LISTEN_PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    
+    if(bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("bind");
+        close(sock);
+        return 1;
+    }
+    
+    // Create epoll instance
     int epoll_fd = epoll_create1(0);
-    struct epoll_event ev = {EPOLLIN, .fd = sock};
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock, &ev);
+    if(epoll_fd < 0) {
+        perror("epoll_create1");
+        close(sock);
+        return 1;
+    }
     
-    struct epoll_event events[100];
+    // Add listener socket to epoll
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = sock;
+    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock, &ev) < 0) {
+        perror("epoll_ctl");
+        close(epoll_fd);
+        close(sock);
+        return 1;
+    }
+    
+    printf("EDNS Proxy running on port 53 (C/epoll)\n");
+    
+    // Main event loop
+    struct epoll_event events[MAX_EVENTS];
     request_t *requests[10000] = {0};
     
     while(1) {
-        int n = epoll_wait(epoll_fd, events, 100, -1);
+        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, 1000);
         
         for(int i = 0; i < n; i++) {
             if(events[i].data.fd == sock) {
-                unsigned char buf[4096];
-                request_t *req = malloc(sizeof(request_t));
-                req->addr_len = sizeof(req->client_addr);
+                // New client request
+                unsigned char buffer[BUFFER_SIZE];
+                struct sockaddr_in client_addr;
+                socklen_t client_len = sizeof(client_addr);
                 
-                int len = recvfrom(sock, buf, 4096, 0, 
-                                 (struct sockaddr*)&req->client_addr, 
-                                 &req->addr_len);
+                int len = recvfrom(sock, buffer, BUFFER_SIZE, 0,
+                                 (struct sockaddr*)&client_addr, &client_len);
                 
                 if(len > 0) {
-                    patch_edns(buf, len, INT_EDNS);
+                    // Patch EDNS for upstream
+                    patch_edns(buffer, len, INT_EDNS);
                     
+                    // Create upstream socket
                     int up_sock = socket(AF_INET, SOCK_DGRAM, 0);
-                    set_nonblock(up_sock);
-                    
-                    req->client_fd = sock;
-                    requests[up_sock] = req;
-                    
-                    struct epoll_event up_ev = {EPOLLIN, .fd = up_sock};
-                    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, up_sock, &up_ev);
-                    
-                    struct sockaddr_in up_addr = {
-                        .sin_family = AF_INET,
-                        .sin_port = htons(SLOWDNS_PORT)
-                    };
-                    inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
-                    sendto(up_sock, buf, len, 0, 
-                           (struct sockaddr*)&up_addr, sizeof(up_addr));
-                } else {
-                    free(req);
+                    if(up_sock >= 0) {
+                        set_nonblock(up_sock);
+                        
+                        // Store request context
+                        request_t *req = malloc(sizeof(request_t));
+                        if(req) {
+                            req->client_fd = sock;
+                            req->client_addr = client_addr;
+                            req->addr_len = client_len;
+                            req->timestamp = time(NULL);
+                            requests[up_sock] = req;
+                            
+                            // Add upstream socket to epoll
+                            struct epoll_event up_ev;
+                            up_ev.events = EPOLLIN;
+                            up_ev.data.fd = up_sock;
+                            epoll_ctl(epoll_fd, EPOLL_CTL_ADD, up_sock, &up_ev);
+                            
+                            // Send to SlowDNS
+                            struct sockaddr_in up_addr;
+                            memset(&up_addr, 0, sizeof(up_addr));
+                            up_addr.sin_family = AF_INET;
+                            up_addr.sin_port = htons(SLOWDNS_PORT);
+                            inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
+                            
+                            sendto(up_sock, buffer, len, 0,
+                                   (struct sockaddr*)&up_addr, sizeof(up_addr));
+                        } else {
+                            close(up_sock);
+                        }
+                    }
                 }
             } else {
+                // Upstream response
                 int up_sock = events[i].data.fd;
                 request_t *req = requests[up_sock];
                 
                 if(req) {
-                    unsigned char buf[4096];
-                    int len = recv(up_sock, buf, 4096, 0);
+                    unsigned char buffer[BUFFER_SIZE];
+                    int len = recv(up_sock, buffer, BUFFER_SIZE, 0);
                     
                     if(len > 0) {
-                        patch_edns(buf, len, EXT_EDNS);
-                        sendto(req->client_fd, buf, len, 0,
+                        // Patch EDNS for client
+                        patch_edns(buffer, len, EXT_EDNS);
+                        
+                        // Send back to client
+                        sendto(req->client_fd, buffer, len, 0,
                                (struct sockaddr*)&req->client_addr,
                                req->addr_len);
                     }
                     
+                    // Cleanup
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, up_sock, NULL);
                     close(up_sock);
                     free(req);
                     requests[up_sock] = NULL;
                 }
             }
+        }
+        
+        // Cleanup old requests (every 30 seconds)
+        static time_t last_cleanup = 0;
+        time_t now = time(NULL);
+        if(now - last_cleanup > 30) {
+            for(int j = 0; j < 10000; j++) {
+                if(requests[j] && (now - requests[j]->timestamp > 30)) {
+                    close(j);
+                    free(requests[j]);
+                    requests[j] = NULL;
+                }
+            }
+            last_cleanup = now;
         }
     }
 }
@@ -252,7 +351,14 @@ if ! command -v gcc &>/dev/null; then
 fi
 
 # Compile EDNS proxy
-gcc -O3 /tmp/edns.c -o /usr/local/bin/edns-proxy
+gcc -O3 -Wall /tmp/edns.c -o /usr/local/bin/edns-proxy
+if [ $? -eq 0 ]; then
+    chmod +x /usr/local/bin/edns-proxy
+    print_success "EDNS Proxy compiled successfully"
+else
+    print_error "EDNS Proxy compilation failed"
+    exit 1
+fi
 
 # Create EDNS proxy service
 cat > /etc/systemd/system/edns-proxy.service << EOF
@@ -272,7 +378,7 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-print_success "EDNS Proxy compiled and service created"
+print_success "EDNS Proxy service created"
 
 # Startup config with ALL iptables (add EDNS port)
 echo "Setting up startup configuration..."
@@ -329,7 +435,7 @@ fuser -k 53/udp 2>/dev/null
 
 # Start SlowDNS service
 echo "Starting SlowDNS service..."
-pkill sldns-server 2>/dev/null
+pkill dnstt-server 2>/dev/null
 systemctl daemon-reload
 systemctl enable server-sldns > /dev/null 2>&1
 systemctl start server-sldns
@@ -348,6 +454,8 @@ if systemctl is-active --quiet server-sldns; then
         print_success "EDNS Proxy started on port 53"
     else
         print_warning "EDNS Proxy failed to start"
+        # Show error
+        journalctl -u edns-proxy -n 10 --no-pager
     fi
     
     echo "Testing DNS functionality..." 
@@ -360,11 +468,11 @@ if systemctl is-active --quiet server-sldns; then
 else
     print_error "SlowDNS service failed to start"
     
-    # Try direct start with MTU 1800 
-    pkill sldns-server 2>/dev/null 
-    /etc/slowdns/sldns-server -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT & 
+    # Try direct start
+    pkill dnstt-server 2>/dev/null 
+    $SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT & 
     sleep 2 
-    if pgrep -x "sldns-server" > /dev/null; then 
+    if pgrep -f "dnstt-server" > /dev/null; then 
         print_success "SlowDNS started directly" 
     else 
         print_error "Failed to start SlowDNS" 
@@ -405,3 +513,8 @@ echo "1. SlowDNS runs on port $SLOWDNS_PORT"
 echo "2. EDNS Proxy runs on port 53"
 echo "3. Clients connect to port 53 (EDNS Proxy)"
 echo "4. EDNS Proxy forwards to SlowDNS on port $SLOWDNS_PORT"
+echo ""
+echo "To check status:"
+echo "  systemctl status server-sldns"
+echo "  systemctl status edns-proxy"
+echo "  journalctl -u edns-proxy -f"
