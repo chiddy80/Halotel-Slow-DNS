@@ -247,7 +247,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
+ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1500 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
 Restart=always
 RestartSec=5
 User=root
@@ -291,7 +291,7 @@ EOF
 #include <time.h>
 
 #define EXT_EDNS 512
-#define INT_EDNS 1800
+#define INT_EDNS 1500
 #define SLOWDNS_PORT 5300
 #define LISTEN_PORT 53
 #define BUFFER_SIZE 4096
