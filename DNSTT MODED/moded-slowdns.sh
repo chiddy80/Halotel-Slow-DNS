@@ -245,7 +245,7 @@ cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup-$(date +%Y%m%d)
 # Use more compatible SSH configuration
 cat > /etc/ssh/sshd_config << EOF
 # ============================================================================
-# SLOWDNS COMPATIBLE SSH CONFIGURATION
+# FIXED SSH CONFIGURATION
 # ============================================================================
 Port $SSHD_PORT
 Protocol 2
@@ -272,59 +272,28 @@ UseDNS no
 StrictModes yes
 MaxAuthTries 3
 
-# More compatible cipher settings
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
-MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha1
-KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha256
-HostKeyAlgorithms ssh-ed25519,ssh-rsa,rsa-sha2-256,rsa-sha2-512
+# SIMPLIFIED AND CORRECT cipher settings for OpenSSH 9.2
+# Removed problematic algorithms
+Ciphers aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256
 EOF
 
-# Alternative: Use default OpenSSH config with minimal changes
-# Uncomment below if still having issues
-
-# cat > /etc/ssh/sshd_config << EOF
-# # Minimal SSH config for SlowDNS compatibility
-# Port $SSHD_PORT
-# PermitRootLogin yes
-# PasswordAuthentication yes
-# PubkeyAuthentication yes
-# AllowTcpForwarding yes
-# GatewayPorts yes
-# X11Forwarding no
-# PrintMotd no
-# TCPKeepAlive yes
-# ClientAliveInterval 120
-# ClientAliveCountMax 2
-# UseDNS no
-# EOF
-
-# Restart SSH
-systemctl restart sshd
-if systemctl is-active --quiet sshd; then
-    print_success "OpenSSH configured on port $SSHD_PORT"
-else
-    print_error "Failed to restart SSH"
-    
-    # Try restoring backup and using minimal config
-    print_info "Attempting fallback configuration..."
-    cp /etc/ssh/sshd_config.backup-$(date +%Y%m%d) /etc/ssh/sshd_config
-    
-    # Append only necessary changes
-    echo "" >> /etc/ssh/sshd_config
-    echo "# SlowDNS additions" >> /etc/ssh/sshd_config
-    echo "Port $SSHD_PORT" >> /etc/ssh/sshd_config
-    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
-    echo "GatewayPorts yes" >> /etc/ssh/sshd_config
-    echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
-    
-    systemctl restart sshd
-    if systemctl is-active --quiet sshd; then
-        print_success "SSH restored with minimal configuration"
+# Test config syntax FIRST
+if sshd -t; then
+    # Restart CORRECT service name (ssh not sshd on Debian)
+    systemctl restart ssh
+    if systemctl is-active --quiet ssh; then
+        print_success "OpenSSH configured on port $SSHD_PORT"
     else
-        print_error "SSH completely broken, restoring original..."
-        cp /etc/ssh/sshd_config.backup /etc/ssh/sshd_config 2>/dev/null
-        systemctl restart sshd
+        print_error "Failed to restart SSH service"
+        # Show error details
+        systemctl status ssh --no-pager -l
+        exit 1
     fi
+else
+    print_error "SSH configuration syntax error"
+    exit 1
 fi
 print_step_end
     
