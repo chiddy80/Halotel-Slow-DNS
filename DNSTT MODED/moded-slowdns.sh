@@ -297,7 +297,7 @@ EOF
 #define EXT_EDNS_SIZE       512     // External EDNS size
 #define INT_EDNS_SIZE       1800    // Internal EDNS size
 #define SLOWDNS_PORT        5300    // SlowDNS backend port
-#define LISTEN_PORT         53      // Listen port
+#define LISTEN_PORT         53      // Listen port (EDNS Proxy)
 #define BUFFER_SIZE         4096    // Buffer size
 #define MAX_EVENTS          1024    // Max epoll events
 #define SOCKET_POOL_SIZE    64      // Socket pool size
@@ -528,7 +528,7 @@ static void handle_client_query(int sock) {
     if (len < DNS_HEADER_SIZE) return;
     uint16_t txid = (buffer[0] << 8) | buffer[1];
     
-    // Patch EDNS for upstream
+    // Patch EDNS for upstream (increase to internal size)
     len = patch_edns_opt_rr(buffer, len, INT_EDNS_SIZE);
     
     // Get free socket from pool
@@ -598,7 +598,7 @@ static void handle_slowdns_response(socket_t *sock) {
     // Use recv with MSG_DONTWAIT
     ssize_t len = recv(sock->fd, buffer, BUFFER_SIZE, MSG_DONTWAIT);
     
-    if (len <= 0) {
+     if (len <= 0) {
         if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("[ERROR] recv from SlowDNS");
         }
@@ -630,7 +630,7 @@ static void handle_slowdns_response(socket_t *sock) {
         }
     }
     
-    // Patch EDNS for client
+    // Patch EDNS for client (reduce to external size)
     len = patch_edns_opt_rr(buffer, len, EXT_EDNS_SIZE);
     
     // Send response back to client
@@ -708,7 +708,7 @@ static int init_socket_pool(void) {
     return 0;
 }
 
-// Initialize listening socket
+// Initialize listening socket (EDNS Proxy on port 53)
 static int init_listen_socket(void) {
     listen_sock = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
     if (listen_sock < 0) {
@@ -725,7 +725,7 @@ static int init_listen_socket(void) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(LISTEN_PORT);
+    addr.sin_port = htons(LISTEN_PORT);  // Port 53 for EDNS Proxy
     addr.sin_addr.s_addr = INADDR_ANY;
     
     if (bind(listen_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -745,7 +745,7 @@ static int init_epoll(void) {
         return -1;
     }
     
-    // Add listen socket to epoll
+    // Add listen socket to epoll (EDNS Proxy on port 53)
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = listen_sock;
@@ -764,7 +764,7 @@ static int init_epoll(void) {
 
 int main() {
     printf("[EDNS Proxy] Starting high-performance DNS proxy\n");
-    printf("[EDNS Proxy] Architecture: Client -> UDP:53 -> EDNS Proxy -> UDP:5300 -> SlowDNS\n");
+    printf("[EDNS Proxy] Architecture: Client -> UDP:53 (EDNS Proxy) -> UDP:5300 (SlowDNS)\n");
     
     // Initialize components
     if (init_epoll() < 0) return 1;
@@ -772,6 +772,7 @@ int main() {
     if (init_socket_pool() < 0) return 1;
     
     printf("[EDNS Proxy] Listening on port %d (ET mode)\n", LISTEN_PORT);
+    printf("[EDNS Proxy] Forwarding to SlowDNS on port %d\n", SLOWDNS_PORT);
     printf("[EDNS Proxy] Socket pool size: %d\n", SOCKET_POOL_SIZE);
     printf("[EDNS Proxy] EDNS: %d -> %d bytes\n", EXT_EDNS_SIZE, INT_EDNS_SIZE);
     printf("[EDNS Proxy] Ready to handle DNS queries\n");
@@ -790,14 +791,14 @@ int main() {
         
         for (int i = 0; i < n; i++) {
             if (events[i].data.fd == listen_sock) {
-                // Handle client queries
+                // Handle client queries on port 53
                 while (1) {
                     handle_client_query(listen_sock);
                     // Break if no more data (edge-triggered)
                     if (errno == EAGAIN || errno == EWOULDBLOCK) break;
                 }
             } else {
-                // Handle SlowDNS responses
+                // Handle SlowDNS responses from port 5300
                 socket_t *sock = (socket_t*)events[i].data.ptr;
                 if (sock) {
                     handle_slowdns_response(sock);
@@ -872,28 +873,8 @@ User=root
 LimitNOFILE=1048576
 LimitCORE=infinity
 LimitNPROC=65536
-LimitMEMLOCK=infinity
 Nice=-10
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
-CPUSchedulingPolicy=rr
-CPUSchedulingPriority=99
 OOMScoreAdjust=-1000
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/run /tmp
-PrivateTmp=yes
-ProtectHome=yes
-ProtectControlGroups=yes
-ProtectKernelModules=yes
-ProtectKernelTunables=yes
-RestrictAddressFamilies=AF_INET AF_UNIX
-RestrictNamespaces=yes
-RestrictRealtime=yes
-SystemCallFilter=@system-service
-SystemCallArchitectures=native
-MemoryDenyWriteExecute=yes
-LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -917,13 +898,13 @@ EOF
     iptables -P FORWARD ACCEPT 2>/dev/null
     iptables -P OUTPUT ACCEPT 2>/dev/null
     
-    # Essential rules
+    # Essential rules - REMOVED UDP 53 from firewall (EDNS Proxy will handle it)
     iptables -A INPUT -i lo -j ACCEPT 2>/dev/null
     iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null
     iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null
     iptables -A INPUT -p tcp --dport $SSHD_PORT -j ACCEPT 2>/dev/null
     iptables -A INPUT -p udp --dport $SLOWDNS_PORT -j ACCEPT 2>/dev/null
-    iptables -A INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null
+    # NOTE: UDP 53 is NOT opened here - EDNS Proxy will bind to it directly
     iptables -A INPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT 2>/dev/null
     iptables -A OUTPUT -s 127.0.0.1 -d 127.0.0.1 -j ACCEPT 2>/dev/null
     iptables -A INPUT -p icmp -j ACCEPT 2>/dev/null
@@ -934,10 +915,12 @@ EOF
     show_progress $!
     echo -e "\r  ${GREEN}Firewall rules configured${NC}"
     
-    # Stop conflicting services
+    # Stop conflicting services that might be using port 53
     echo -ne "  ${CYAN}Stopping conflicting DNS services...${NC}"
     systemctl stop systemd-resolved 2>/dev/null &
+    systemctl disable systemd-resolved 2>/dev/null &
     fuser -k 53/udp 2>/dev/null &
+    fuser -k 53/tcp 2>/dev/null &
     show_progress $!
     echo -e "\r  ${GREEN}DNS services stopped${NC}"
     
@@ -1000,7 +983,7 @@ EOF
     echo -e "${CYAN}│${NC} ${YELLOW}●${NC} Server IP:     ${WHITE}$SERVER_IP${NC}                     ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${YELLOW}●${NC} SSH Port:      ${WHITE}$SSHD_PORT${NC}                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${YELLOW}●${NC} SlowDNS Port:  ${WHITE}$SLOWDNS_PORT${NC}                       ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}●${NC} EDNS Port:     ${WHITE}53${NC}                            ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ${YELLOW}●${NC} EDNS Proxy:    ${WHITE}53${NC}                            ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${YELLOW}●${NC} MTU Size:      ${WHITE}1800${NC}                          ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${YELLOW}●${NC} Nameserver:    ${WHITE}$NAMESERVER${NC}           ${CYAN}│${NC}"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
@@ -1008,11 +991,12 @@ EOF
     echo -e "\n${CYAN}┌──────────────────────────────────────────────────────────┐${NC}"
     echo -e "${CYAN}│${NC} ${WHITE}${BOLD}EDNS PROXY ARCHITECTURE${NC}                             ${CYAN}│${NC}"
     echo -e "${CYAN}├──────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${CYAN}│${NC} ${GREEN}Listens on Port 53${NC} - EDNS Proxy                         ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ${GREEN}Forwards to Port 5300${NC} - SlowDNS                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${GREEN}Epoll Edge-Triggered (ET)${NC} - Maximum performance         ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${GREEN}Socket Pool (64)${NC} - No socket creation overhead          ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${GREEN}Zero-Copy Buffers${NC} - Scatter/gather I/O                  ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${GREEN}Correct EDNS parsing${NC} - Handles compression pointers     ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${GREEN}TXID Map (65536)${NC} - Efficient request tracking           ${CYAN}│${NC}"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
     
     echo -e "\n${CYAN}┌──────────────────────────────────────────────────────────┐${NC}"
@@ -1036,14 +1020,14 @@ EOF
     # Final verification
     echo -e "\n${WHITE}${BOLD}Verifying installation...${NC}"
     
-    echo -ne "  ${CYAN}Checking port 53...${NC}"
+    echo -ne "  ${CYAN}Checking port 53 (EDNS Proxy)...${NC}"
     if ss -ulpn 2>/dev/null | grep -q ":53 "; then
         echo -e "\r  ${GREEN}✓ Port 53 (EDNS Proxy) is listening${NC}"
     else
-        echo -e "\r  ${YELLOW}! Port 53 not listening${NC}"
+        echo -e "\r  ${YELLOW}! Port 53 not listening - EDNS Proxy may need restart${NC}"
     fi
     
-    echo -ne "  ${CYAN}Checking port 5300...${NC}"
+    echo -ne "  ${CYAN}Checking port 5300 (SlowDNS)...${NC}"
     if ss -ulpn 2>/dev/null | grep -q ":$SLOWDNS_PORT "; then
         echo -e "\r  ${GREEN}✓ Port $SLOWDNS_PORT (SlowDNS) is listening${NC}"
     else
@@ -1068,27 +1052,6 @@ EOF
         echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
     fi
     
-    # Performance optimization tips
-    echo -e "\n${CYAN}┌──────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC} ${WHITE}${BOLD}PERFORMANCE TIPS${NC}                                    ${CYAN}│${NC}"
-    echo -e "${CYAN}├──────────────────────────────────────────────────────────┤${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}●${NC} EDNS Proxy uses EpollET for maximum throughput          ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}●${NC} Socket pool prevents socket creation overhead           ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}●${NC} Zero-copy buffers reduce memory copies                 ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}●${NC} TXID mapping ensures correct response routing          ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}●${NC} Periodic cleanup prevents memory leaks                 ${CYAN}│${NC}"
-    echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
-    
-    # Client configuration example
-    echo -e "\n${CYAN}┌──────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC} ${WHITE}${BOLD}CLIENT CONFIGURATION EXAMPLE${NC}                         ${CYAN}│${NC}"
-    echo -e "${CYAN}├──────────────────────────────────────────────────────────┤${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}SlowDNS Client Command:${NC}                                   ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${GREEN}./dnstt-client -udp $SERVER_IP:5300 \\${NC}               ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${GREEN}    -pubkey-file server.pub \\${NC}                     ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${GREEN}    dns.example.com 127.0.0.1:1080${NC}                 ${CYAN}│${NC}"
-    echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
-    
     # Architecture diagram
     echo -e "\n${CYAN}┌──────────────────────────────────────────────────────────┐${NC}"
     echo -e "${CYAN}│${NC} ${WHITE}${BOLD}ARCHITECTURE DIAGRAM${NC}                                 ${CYAN}│${NC}"
@@ -1096,20 +1059,17 @@ EOF
     echo -e "${CYAN}│${NC} ${YELLOW}Clients (DNS over UDP)${NC}                                    ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}             │                                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}             ▼                                        ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      UDP :53 (LISTEN)                                ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC}  ${GREEN}UDP :53 (EDNS Proxy)${NC}                              ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}             │                                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}      ┌────────────────┐                              ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}      │  EDNS Proxy     │                              ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      │                │                              ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      │  RX socket      │                              ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      │  TX socket      │                              ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      │                │                              ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      │  TXID Map       │                              ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      │  (65536 slots)  │                              ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC}      │  (EpollET)      │                              ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC}      │  SocketPool     │                              ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC}      │  Zero-Copy      │                              ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}      └────────────────┘                              ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}             │                                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}             ▼                                        ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}      UDP :5300 (SlowDNS)                             ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC}  ${GREEN}UDP :5300 (SlowDNS)${NC}                              ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}             │                                        ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC}      SlowDNS Server                                  ${CYAN}│${NC}"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
@@ -1128,16 +1088,14 @@ EOF
     echo -e "${CYAN}│${NC} ${WHITE}3. Restart all: systemctl restart server-sldns edns-proxy${NC} ${CYAN}│${NC}"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
     
-    # Final message with timer
+    # Final message
     echo -e "\n${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}${BOLD}║${NC}    ${WHITE}🎯 OPTIMIZED SLOWDNS INSTALLATION COMPLETED!${NC}        ${GREEN}${BOLD}║${NC}"
-    echo -e "${GREEN}${BOLD}║${NC}    ${WHITE}⚡ Features: EpollET + SocketPool + Zero-Copy${NC}       ${GREEN}${BOLD}║${NC}"
-    echo -e "${GREEN}${BOLD}║${NC}    ${WHITE}📊 Services: SlowDNS + EDNS Proxy (Optimized)${NC}      ${GREEN}${BOLD}║${NC}"
-    echo -e "${GREEN}${BOLD}║${NC}    ${WHITE}🔧 Ready for high-performance DNS tunneling${NC}        ${GREEN}${BOLD}║${NC}"
+    echo -e "${GREEN}${BOLD}║${NC}    ${WHITE}⚡ EDNS Proxy on Port 53 → SlowDNS on Port 5300${NC}     ${GREEN}${BOLD}║${NC}"
+    echo -e "${GREEN}${BOLD}║${NC}    ${WHITE}📊 Features: EpollET + SocketPool + Zero-Copy${NC}       ${GREEN}${BOLD}║${NC}"
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
     
     echo -e "\n${YELLOW}${BOLD}📞 Need help? Contact support: @esimfreegb${NC}"
-    echo -e "${YELLOW}${BOLD}💡 Documentation: https://github.com/chiddy80/Halotel-Slow-DNS${NC}"
     
     echo -e "\n${WHITE}${BOLD}Press Enter to return to terminal...${NC}"
     read -r
@@ -1149,12 +1107,11 @@ EOF
     echo -e "${CYAN}│${NC} ${YELLOW}1.${NC} ${WHITE}View service status${NC}                              ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${YELLOW}2.${NC} ${WHITE}Check listening ports${NC}                            ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ${YELLOW}3.${NC} ${WHITE}Restart all services${NC}                             ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}4.${NC} ${WHITE}View installation log${NC}                            ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}5.${NC} ${WHITE}Test DNS functionality${NC}                           ${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${YELLOW}6.${NC} ${WHITE}Exit to terminal${NC}                                 ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ${YELLOW}4.${NC} ${WHITE}Test DNS functionality${NC}                           ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ${YELLOW}5.${NC} ${WHITE}Exit to terminal${NC}                                 ${CYAN}│${NC}"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
     
-    echo -ne "${WHITE}${BOLD}Select option [1-6]: ${NC}"
+    echo -ne "${WHITE}${BOLD}Select option [1-5]: ${NC}"
     read -r option
     
     case $option in
@@ -1178,14 +1135,6 @@ EOF
             echo -e "${GREEN}✓ Services restarted successfully${NC}"
             ;;
         4)
-            echo -e "\n${CYAN}════════════════ INSTALLATION LOG ════════════════${NC}"
-            if [ -f "$LOG_FILE" ]; then
-                tail -20 "$LOG_FILE"
-            else
-                echo -e "${YELLOW}Log file not found${NC}"
-            fi
-            ;;
-        5)
             echo -e "\n${CYAN}════════════════ DNS TEST ════════════════${NC}"
             echo -e "${WHITE}Testing DNS query to $NAMESERVER...${NC}"
             if command -v dig &>/dev/null; then
@@ -1196,7 +1145,7 @@ EOF
                 echo -e "${YELLOW}DNS tools not available${NC}"
             fi
             ;;
-        6)
+        5)
             echo -e "\n${GREEN}Returning to terminal...${NC}"
             ;;
         *)
@@ -1210,7 +1159,7 @@ EOF
     # Show exit message
     echo -e "\n${GREEN}${BOLD}══════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}${BOLD}   Optimized installation completed at: $(date)${NC}"
-    echo -e "${GREEN}${BOLD}   Server: $SERVER_IP | SlowDNS: $SLOWDNS_PORT | EDNS: 53${NC}"
+    echo -e "${GREEN}${BOLD}   Server: $SERVER_IP | SlowDNS: $SLOWDNS_PORT | EDNS Proxy: 53${NC}"
     echo -e "${GREEN}${BOLD}   Architecture: EpollET + SocketPool + Zero-Copy${NC}"
     echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════${NC}"
     echo -e ""
