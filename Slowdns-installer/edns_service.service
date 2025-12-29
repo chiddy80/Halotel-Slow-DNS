@@ -1,34 +1,13 @@
-
 [Unit]
-Description=EDNS Proxy for SlowDNS
-After=network-online.target server-sldns.service
-Wants=network-online.target
+Description=EDNS Accelerator for SlowDNS
+After=network.target server-sldns.service
 Requires=server-sldns.service
 
 [Service]
-Type=simple
 ExecStart=/usr/local/bin/edns-proxy
 Restart=always
-RestartSec=1
-
-# Required for UDP, epoll, raw sockets
-User=root
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-
-# High performance tuning
+RestartSec=2
 LimitNOFILE=1048576
-LimitCORE=infinity
-LimitNPROC=1048576
-
-# Do NOT sandbox networking
-PrivateTmp=false
-ProtectSystem=false
-NoNewPrivileges=false
-
-# Fast shutdown
-KillSignal=SIGINT
-TimeoutStopSec=5
 
 [Install]
 WantedBy=multi-user.target
