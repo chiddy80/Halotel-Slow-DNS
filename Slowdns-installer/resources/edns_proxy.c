@@ -1,4 +1,5 @@
-#include <stdio.h>
+// Exact copy from bash script - converted to string
+const EDNS_SOURCE: &str = r#"#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -8,14 +9,13 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <time.h>
-#include <errno.h>
 
 #define EXT_EDNS 512
 #define INT_EDNS 1800
 #define SLOWDNS_PORT 5300
 #define LISTEN_PORT 53
 #define BUFFER_SIZE 4096
-#define MAX_EVENTS 1024
+#define MAX_EVENTS 100
 
 typedef struct {
     int client_fd;
@@ -26,15 +26,12 @@ typedef struct {
 
 int patch_edns(unsigned char *buf, int len, int new_size) {
     if(len < 12) return len;
-    
     int offset = 12;
     int qdcount = (buf[4] << 8) | buf[5];
-    
     for(int i = 0; i < qdcount && offset < len; i++) {
         while(offset < len && buf[offset]) offset++;
         offset += 5;
     }
-    
     int arcount = (buf[10] << 8) | buf[11];
     for(int i = 0; i < arcount && offset < len; i++) {
         if(buf[offset] == 0 && offset + 4 < len) {
@@ -57,19 +54,16 @@ int set_nonblock(int fd) {
 }
 
 int main() {
-    printf("[EDNS Proxy] Starting...\n");
+    printf("[EDNS Proxy] Starting high-performance DNS proxy...\n");
     
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock < 0) {
-        perror("socket");
+        perror("[ERROR] socket");
         return 1;
     }
     
-    int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    
     if(set_nonblock(sock) < 0) {
-        perror("fcntl");
+        perror("[ERROR] fcntl");
         close(sock);
         return 1;
     }
@@ -81,14 +75,14 @@ int main() {
     addr.sin_addr.s_addr = INADDR_ANY;
     
     if(bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("bind");
+        perror("[ERROR] bind");
         close(sock);
         return 1;
     }
     
     int epoll_fd = epoll_create1(0);
     if(epoll_fd < 0) {
-        perror("epoll_create1");
+        perror("[ERROR] epoll_create1");
         close(sock);
         return 1;
     }
@@ -98,13 +92,14 @@ int main() {
     ev.data.fd = sock;
     
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock, &ev) < 0) {
-        perror("epoll_ctl");
+        perror("[ERROR] epoll_ctl");
         close(epoll_fd);
         close(sock);
         return 1;
     }
     
-    printf("[EDNS Proxy] Listening on port %d\n", LISTEN_PORT);
+    printf("[EDNS Proxy] Listening on port 53 (epoll optimized)\n");
+    printf("[EDNS Proxy] Ready to handle DNS queries\n");
     
     struct epoll_event events[MAX_EVENTS];
     request_t *requests[10000] = {0};
@@ -116,47 +111,31 @@ int main() {
                 unsigned char buffer[BUFFER_SIZE];
                 struct sockaddr_in client_addr;
                 socklen_t client_len = sizeof(client_addr);
-                
                 int len = recvfrom(sock, buffer, BUFFER_SIZE, 0,
                                  (struct sockaddr*)&client_addr, &client_len);
                 if(len > 0) {
                     patch_edns(buffer, len, INT_EDNS);
-                    
                     int up_sock = socket(AF_INET, SOCK_DGRAM, 0);
                     if(up_sock >= 0) {
                         set_nonblock(up_sock);
-                        
                         request_t *req = malloc(sizeof(request_t));
                         if(req) {
                             req->client_fd = sock;
                             req->client_addr = client_addr;
                             req->addr_len = client_len;
                             req->timestamp = time(NULL);
-                            
-                            if(up_sock < 10000) {
-                                requests[up_sock] = req;
-                                
-                                struct epoll_event up_ev;
-                                up_ev.events = EPOLLIN;
-                                up_ev.data.fd = up_sock;
-                                
-                                if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, up_sock, &up_ev) == 0) {
-                                    struct sockaddr_in up_addr;
-                                    memset(&up_addr, 0, sizeof(up_addr));
-                                    up_addr.sin_family = AF_INET;
-                                    up_addr.sin_port = htons(SLOWDNS_PORT);
-                                    inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
-                                    
-                                    sendto(up_sock, buffer, len, 0,
-                                           (struct sockaddr*)&up_addr, sizeof(up_addr));
-                                } else {
-                                    free(req);
-                                    close(up_sock);
-                                }
-                            } else {
-                                free(req);
-                                close(up_sock);
-                            }
+                            requests[up_sock] = req;
+                            struct epoll_event up_ev;
+                            up_ev.events = EPOLLIN;
+                            up_ev.data.fd = up_sock;
+                            epoll_ctl(epoll_fd, EPOLL_CTL_ADD, up_sock, &up_ev);
+                            struct sockaddr_in up_addr;
+                            memset(&up_addr, 0, sizeof(up_addr));
+                            up_addr.sin_family = AF_INET;
+                            up_addr.sin_port = htons(SLOWDNS_PORT);
+                            inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
+                            sendto(up_sock, buffer, len, 0,
+                                   (struct sockaddr*)&up_addr, sizeof(up_addr));
                         } else {
                             close(up_sock);
                         }
@@ -182,6 +161,5 @@ int main() {
             }
         }
     }
-    
     return 0;
-}
+}"#;
