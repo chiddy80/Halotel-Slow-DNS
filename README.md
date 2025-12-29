@@ -8,7 +8,7 @@ chmod +x moded-slowdns.sh && \
 ./moded-slowdns.sh
 
 
-# Modern SlowDNS Installer (Rust)
+### Modern SlowDNS Installer (Rust)
 
 A high-performance, modern SlowDNS installer written in Rust. Features professional installation, systemd integration, and optimized networking.
 
@@ -27,11 +27,3 @@ A high-performance, modern SlowDNS installer written in Rust. Features professio
 - Rust 1.70+ (install via rustup)
 - Root access
 - Ubuntu/Debian system
-
-### Installation
-
-1. **Clone and build:**
-```bash
-git clone https://github.com/yourusername/slowdns-rust-installer.git
-cd slowdns-rust-installer
-cargo build --release
