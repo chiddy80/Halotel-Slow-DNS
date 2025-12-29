@@ -1,0 +1,21 @@
+[Unit]
+Description=EDNS Proxy for SlowDNS
+Description=High-performance DNS proxy with EDNS support
+After=server-sldns.service
+Requires=server-sldns.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/edns-proxy
+Restart=always
+RestartSec=3
+User=root
+LimitNOFILE=65536
+LimitCORE=infinity
+ProtectSystem=strict
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
