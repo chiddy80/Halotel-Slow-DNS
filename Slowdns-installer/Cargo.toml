@@ -11,3 +11,7 @@ anyhow = "1.0.75"
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4.31"
 libc = "0.2.150"
+
+[[bin]]
+name = "slowdns"
+path = "src/main.rs"
