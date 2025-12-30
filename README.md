@@ -1,3 +1,5 @@
 
 ### ⌛ FAST DNS HALOTEL TANZANIA 🇹🇿🚀
-sudo wget -O- https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded-slowdns.py | python3 -- --install
+.....bash
+cd /root
+wget https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded-slowdns.py -O moded-slowdns.py
