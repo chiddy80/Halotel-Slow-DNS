@@ -7,6 +7,4 @@ wget https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MO
 
 python3 moded-slowdns.py --install
 
-apt update
-apt install -y python3-pip
-pip3 install psutil
+apt update && apt install -y && python3-pip pip3 install psutil
