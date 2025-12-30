@@ -499,17 +499,261 @@ fn main() {
                             }
                         }
                     }
+use std::net::UdpSocket;
+use std::thread;
+use std::time::Duration;
+
+const BUFFER_SIZE: usize = 4096;
+const SLOWDNS_PORT: u16 = 5300;
+const LISTEN_PORT: u16 = 53;
+const EXT_EDNS_SIZE: u16 = 512;    // External EDNS size (to client)
+const INT_EDNS_SIZE: u16 = 1800;   // Internal EDNS size (to SlowDNS)
+
+fn patch_edns(buf: &mut [u8], new_size: u16) -> usize {
+    let len = buf.len();
+    if len < 12 {
+        return len;
+    }
+    
+    // Get ARCOUNT from DNS header (bytes 10-11)
+    let arcount = ((buf[10] as u16) << 8) | buf[11] as u16;
+    let mut offset = 12;
+    
+    // Skip QDCOUNT questions (bytes 4-5)
+    let qdcount = ((buf[4] as u16) << 8) | buf[5] as u16;
+    for _ in 0..qdcount {
+        if offset >= len {
+            return len;
+        }
+        // Skip domain name (labels terminated by 0)
+        while offset < len && buf[offset] != 0 {
+            offset += 1;
+        }
+        offset += 5; // Skip null byte + QTYPE (2) + QCLASS (2)
+    }
+    
+    // Skip ANCOUNT answers (bytes 6-7)
+    let ancount = ((buf[6] as u16) << 8) | buf[7] as u16;
+    for _ in 0..ancount {
+        if offset >= len {
+            return len;
+        }
+        // Check for compression pointer (first 2 bits = 11)
+        if buf[offset] & 0xC0 == 0xC0 {
+            offset += 2;
+        } else {
+            // Skip domain name
+            while offset < len && buf[offset] != 0 {
+                offset += 1;
+            }
+            offset += 1;
+        }
+        offset += 10; // Skip TYPE (2), CLASS (2), TTL (4), RDLENGTH (2)
+        
+        // Skip RDATA
+        if offset + 1 < len {
+            let rdlength = ((buf[offset - 2] as u16) << 8) | buf[offset - 1] as u16;
+            offset += rdlength as usize;
+        }
+    }
+    
+    // Skip NSCOUNT authorities (bytes 8-9)
+    let nscount = ((buf[8] as u16) << 8) | buf[9] as u16;
+    for _ in 0..nscount {
+        if offset >= len {
+            return len;
+        }
+        if buf[offset] & 0xC0 == 0xC0 {
+            offset += 2;
+        } else {
+            while offset < len && buf[offset] != 0 {
+                offset += 1;
+            }
+            offset += 1;
+        }
+        offset += 10;
+        if offset + 1 < len {
+            let rdlength = ((buf[offset - 2] as u16) << 8) | buf[offset - 1] as u16;
+            offset += rdlength as usize;
+        }
+    }
+    
+    // Process additional records for EDNS OPT record
+    for _ in 0..arcount {
+        if offset >= len {
+            return len;
+        }
+        
+        // Check if this is an OPT record (root domain = single 0 byte)
+        if buf[offset] == 0 && offset + 4 < len {
+            let rtype = ((buf[offset + 1] as u16) << 8) | buf[offset + 2] as u16;
+            if rtype == 41 { // OPT RR type (41 = EDNS)
+                // Update UDP payload size in OPT record (bytes 3-4 after root)
+                buf[offset + 3] = (new_size >> 8) as u8;
+                buf[offset + 4] = (new_size & 0xFF) as u8;
+                println!("[DEBUG] Patched EDNS size to: {} bytes", new_size);
+                return len;
+            }
+        }
+        
+        // Skip this record
+        offset += 1;
+        if offset >= len {
+            break;
+        }
+    }
+    
+    // If no OPT record found, we could add one, but for now just return
+    println!("[DEBUG] No OPT record found, EDNS not patched");
+    len
+}
+
+fn main() {
+    println!("╔══════════════════════════════════════════════════════════╗");
+    println!("║          🚀 RUST EDNS PROXY FOR SLOWDNS                 ║");
+    println!("║           External: {} | Internal: {} bytes           ║", EXT_EDNS_SIZE, INT_EDNS_SIZE);
+    println!("╚══════════════════════════════════════════════════════════╝");
+    println!("");
+    
+    println!("[EDNS Proxy] Starting Rust EDNS proxy...");
+    println!("[EDNS Proxy] Configuration:");
+    println!("[EDNS Proxy]   Listen port: {}", LISTEN_PORT);
+    println!("[EDNS Proxy]   Forward port: {}", SLOWDNS_PORT);
+    println!("[EDNS Proxy]   External EDNS: {} bytes", EXT_EDNS_SIZE);
+    println!("[EDNS Proxy]   Internal EDNS: {} bytes", INT_EDNS_SIZE);
+    
+    // Create listening socket (port 53)
+    let listen_socket = match UdpSocket::bind(("0.0.0.0", LISTEN_PORT)) {
+        Ok(socket) => {
+            println!("[EDNS Proxy] ✓ Listening on port {}", LISTEN_PORT);
+            socket
+        }
+        Err(e) => {
+            eprintln!("[ERROR] Failed to bind to port {}: {}", LISTEN_PORT, e);
+            eprintln!("[ERROR] Make sure port {} is available and you have root privileges", LISTEN_PORT);
+            std::process::exit(1);
+        }
+    };
+    
+    // Set non-blocking behavior with timeout
+    listen_socket.set_read_timeout(Some(Duration::from_millis(100))).unwrap_or_default();
+    listen_socket.set_nonblocking(false).unwrap_or_default();
+    
+    // Create forward socket for SlowDNS
+    let forward_socket = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(socket) => {
+            println!("[EDNS Proxy] ✓ Forward socket created");
+            socket
+        }
+        Err(e) => {
+            eprintln!("[ERROR] Failed to create forward socket: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    forward_socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap_or_default();
+    
+    let forward_addr = format!("127.0.0.1:{}", SLOWDNS_PORT);
+    let mut buffer = [0u8; BUFFER_SIZE];
+    
+    println!("[EDNS Proxy] ✓ Forwarding to: {}", forward_addr);
+    println!("[EDNS Proxy] ✓ Ready to handle DNS queries");
+    println!("[EDNS Proxy] ✓ EDNS patching: {} <-> {} bytes", EXT_EDNS_SIZE, INT_EDNS_SIZE);
+    
+    // Set up Ctrl+C handler for graceful shutdown
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let r = running.clone();
+    
+    ctrlc::set_handler(move || {
+        println!("\n[INFO] Received shutdown signal");
+        r.store(false, std::sync::atomic::Ordering::SeqCst);
+    }).expect("[ERROR] Failed to set Ctrl+C handler");
+    
+    println!("[INFO] Press Ctrl+C to stop the proxy");
+    
+    let mut packet_count = 0;
+    let mut last_log_time = std::time::Instant::now();
+    
+    while running.load(std::sync::atomic::Ordering::SeqCst) {
+        match listen_socket.recv_from(&mut buffer) {
+            Ok((size, client_addr)) => {
+                packet_count += 1;
+                
+                // Log every 100 packets or every 10 seconds
+                if packet_count % 100 == 0 || last_log_time.elapsed() > Duration::from_secs(10) {
+                    println!("[INFO] Processed {} packets from {}", packet_count, client_addr.ip());
+                    last_log_time = std::time::Instant::now();
+                }
+                
+                // Create packet copy
+                let mut packet = buffer[..size].to_vec();
+                
+                // Log first few bytes for debugging
+                if packet_count <= 5 {
+                    println!("[DEBUG] Packet {} first bytes: {:02x}{:02x}...", 
+                             packet_count, packet[0], packet[1]);
+                }
+                
+                // Patch EDNS for incoming query (increase MTU to SlowDNS)
+                let original_size = packet.len();
+                patch_edns(&mut packet, INT_EDNS_SIZE);
+                
+                if packet.len() != original_size {
+                    println!("[DEBUG] Packet size changed: {} -> {} bytes", original_size, packet.len());
+                }
+                
+                // Forward to SlowDNS
+                match forward_socket.send_to(&packet, &forward_addr) {
+                    Ok(bytes_sent) => {
+                        if packet_count <= 5 {
+                            println!("[DEBUG] Forwarded {} bytes to SlowDNS", bytes_sent);
+                        }
+                        
+                        // Try to receive response from SlowDNS
+                        let mut resp_buffer = [0u8; BUFFER_SIZE];
+                        match forward_socket.recv_from(&mut resp_buffer) {
+                            Ok((resp_size, _)) => {
+                                let mut response = resp_buffer[..resp_size].to_vec();
+                                
+                                // Patch EDNS for outgoing response (decrease MTU to client)
+                                patch_edns(&mut response, EXT_EDNS_SIZE);
+                                
+                                // Send response back to client
+                                match listen_socket.send_to(&response, client_addr) {
+                                    Ok(_) => {
+                                        if packet_count <= 5 {
+                                            println!("[DEBUG] Response sent to client");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[ERROR] Failed to send response to client: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                if e.kind() != std::io::ErrorKind::WouldBlock && 
+                                   e.kind() != std::io::ErrorKind::TimedOut {
+                                    eprintln!("[ERROR] Failed to receive from SlowDNS: {}", e);
+                                }
+                            }
+                        }
+                    }
                     Err(e) => {
-                        eprintln!("[ERROR] Failed to forward packet: {}", e);
+                        eprintln!("[ERROR] Failed to forward packet to SlowDNS: {}", e);
                     }
                 }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // No data available, sleep a bit
+                // No data available, sleep to reduce CPU usage
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                // Timeout is expected, continue
                 thread::sleep(Duration::from_millis(10));
             }
             Err(e) => {
                 eprintln!("[ERROR] Receive error: {}", e);
+                thread::sleep(Duration::from_millis(100));
             }
         }
     }
