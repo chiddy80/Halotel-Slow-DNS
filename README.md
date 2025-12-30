@@ -1,6 +1,6 @@
 # 🚀 FAST DNS HALOTEL TANZANIA 🇹🇿
 
-## Quick Installation
+## PYTHON QUICK INSTALL 🔥
 
 Copy and paste this single command to install:
 
