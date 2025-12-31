@@ -382,48 +382,137 @@ int main(){
     epoll_ctl(ep,EPOLL_CTL_ADD,s,&ev);
 
     int up[UPSTREAM_POOL];
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <time.h>
+
+#define EXT_EDNS 512
+#define INT_EDNS 1800
+#define LISTEN_PORT 53
+#define SLOWDNS_PORT 5300
+#define BUFFER_SIZE 4096
+#define MAX_EVENTS 4096
+#define CACHE_SIZE 32768
+#define UPSTREAM_POOL 16
+
+typedef struct {
+    unsigned short id;
+    unsigned char q[256];
+    int qlen;
+    unsigned char response[2048];
+    int rlen;
+    time_t expiry;
+} cache_entry;
+
+cache_entry cache[CACHE_SIZE];
+
+typedef struct {
+    struct sockaddr_in client;
+    socklen_t len;
+    unsigned short id;
+} pending;
+
+pending pending_req[65536];
+
+unsigned int hash(unsigned char *q, int len) {
+    unsigned int h = 5381;
+    for(int i=0;i<len;i++) h = ((h<<5)+h)+q[i];
+    return h % CACHE_SIZE;
+}
+
+int find_cache(unsigned char *q, int len) {
+    unsigned int h = hash(q,len);
+    if(cache[h].qlen == len && memcmp(cache[h].q,q,len)==0 && cache[h].expiry > time(NULL))
+        return h;
+    return -1;
+}
+
+void save_cache(unsigned char *q,int qlen,unsigned char *r,int rlen) {
+    unsigned int h = hash(q,qlen);
+    memcpy(cache[h].q,q,qlen);
+    cache[h].qlen = qlen;
+    memcpy(cache[h].response,r,rlen);
+    cache[h].rlen = rlen;
+    cache[h].expiry = time(NULL) + 300;
+}
+
+int set_nonblock(int fd){
+    return fcntl(fd,F_SETFL,fcntl(fd,F_GETFL)|O_NONBLOCK);
+}
+
+int main() {
+    printf("[EDNS] Streaming-Optimized Proxy Started\n");
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int one=1, buf=64*1024*1024;
+    setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
+    setsockopt(sock,SOL_SOCKET,SO_RCVBUF,&buf,sizeof(buf));
+    setsockopt(sock,SOL_SOCKET,SO_SNDBUF,&buf,sizeof(buf));
+    set_nonblock(sock);
+
+    struct sockaddr_in addr={0};
+    addr.sin_family=AF_INET;
+    addr.sin_port=htons(LISTEN_PORT);
+    addr.sin_addr.s_addr=INADDR_ANY;
+    bind(sock,(void*)&addr,sizeof(addr));
+
+    int ep=epoll_create1(0);
+    struct epoll_event ev={.events=EPOLLIN,.data.fd=sock};
+    epoll_ctl(ep,EPOLL_CTL_ADD,sock,&ev);
+
+    int upstream[UPSTREAM_POOL];
     for(int i=0;i<UPSTREAM_POOL;i++){
-        up[i]=socket(AF_INET,SOCK_DGRAM,0);
-        setnb(up[i]);
-        struct epoll_event e={.events=EPOLLIN,.data.fd=up[i]};
-        epoll_ctl(ep,EPOLL_CTL_ADD,up[i],&e);
+        upstream[i]=socket(AF_INET,SOCK_DGRAM,0);
+        set_nonblock(upstream[i]);
+        struct epoll_event u={.events=EPOLLIN,.data.fd=upstream[i]};
+        epoll_ctl(ep,EPOLL_CTL_ADD,upstream[i],&u);
     }
 
-    struct sockaddr_in slow={.sin_family=AF_INET,.sin_port=htons(SLOWDNS_PORT)};
-    inet_pton(AF_INET,"127.0.0.1",&slow.sin_addr);
+    struct sockaddr_in slowdns={0};
+    slowdns.sin_family=AF_INET;
+    slowdns.sin_port=htons(SLOWDNS_PORT);
+    inet_pton(AF_INET,"127.0.0.1",&slowdns.sin_addr);
 
-    struct epoll_event evs[MAX_EVENTS];
     unsigned idx=0;
 
     while(1){
-        int n=epoll_wait(ep,evs,MAX_EVENTS,-1);
+        struct epoll_event events[MAX_EVENTS];
+        int n=epoll_wait(ep,events,MAX_EVENTS,-1);
         for(int i=0;i<n;i++){
-            int fd=evs[i].data.fd;
-            unsigned char buf[BUFFER_SIZE];
+            int fd=events[i].data.fd;
+            unsigned char buf2[BUFFER_SIZE];
+            struct sockaddr_in c;
+            socklen_t l=sizeof(c);
 
-            if(fd==s){
-                struct sockaddr_in c; socklen_t cl=sizeof(c);
-                int l=recvfrom(s,buf,BUFFER_SIZE,0,(void*)&c,&cl);
-                if(l<=0) continue;
-
-                unsigned char out[BUFFER_SIZE];
-                int cached=cache_lookup(buf,l,&c,out);
-                if(cached){
-                    sendto(s,out,cached,0,(void*)&c,cl);
-                    continue;
+            if(fd==sock){
+                int len=recvfrom(sock,buf2,sizeof(buf2),0,(void*)&c,&l);
+                if(len>12){
+                    int ql=len-12;
+                    int ci=find_cache(buf2+12,ql);
+                    if(ci>=0){
+                        memcpy(buf2,cache[ci].response,cache[ci].rlen);
+                        sendto(sock,buf2,cache[ci].rlen,0,(void*)&c,l);
+                        continue;
+                    }
+                    int u=upstream[idx++%UPSTREAM_POOL];
+                    pending_req[u].client=c;
+                    pending_req[u].len=l;
+                    pending_req[u].id=(buf2[0]<<8)|buf2[1];
+                    sendto(u,buf2,len,0,(void*)&slowdns,sizeof(slowdns));
                 }
-
-                patch_edns(buf,INT_EDNS);
-                int u=up[idx++%UPSTREAM_POOL];
-                reqmap[u].client=c;
-                reqmap[u].len=cl;
-                sendto(u,buf,l,0,(void*)&slow,sizeof(slow));
             } else {
-                int l=recv(fd,buf,BUFFER_SIZE,0);
-                if(l>0){
-                    patch_edns(buf,EXT_EDNS);
-                    cache_store(buf,l,&reqmap[fd].client,buf,l);
-                    sendto(s,buf,l,0,(void*)&reqmap[fd].client,reqmap[fd].len);
+                int len=recv(fd,buf2,sizeof(buf2),0);
+                if(len>0){
+                    save_cache(buf2+12,len-12,buf2,len);
+                    sendto(sock,buf2,len,0,(void*)&pending_req[fd].client,pending_req[fd].len);
                 }
             }
         }
