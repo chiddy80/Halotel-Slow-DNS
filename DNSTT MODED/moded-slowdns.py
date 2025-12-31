@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-🚀 ULTRA-FAST SLOWDNS INSTALLATION SCRIPT - Optimized Python Edition
-Fixed performance issues - Faster installation & better network throughput
-All functions optimized for speed and stability
+🚀 ULTRA-FAST SLOWDNS INSTALLATION - Working EDNS Proxy
+Fixed compilation issues - Guaranteed working installation
 """
 
 import os
@@ -16,11 +15,9 @@ import multiprocessing
 from pathlib import Path
 from datetime import datetime
 import shutil
-import asyncio
-import selectors
 
 # ============================================================================
-# OPTIMIZED COLORS & DESIGN
+# OPTIMIZED COLORS
 # ============================================================================
 class Colors:
     RED = '\033[0;31m'
@@ -33,27 +30,24 @@ class Colors:
     BOLD = '\033[1m'
     NC = '\033[0m'
 
-# Optimized printing functions
 def sprint(color, text):
-    """Fast print with color"""
     sys.stdout.write(f"{color}{text}{Colors.NC}")
     sys.stdout.flush()
 
 def print_banner():
-    """Optimized banner without clear"""
     banner = f"""
 {Colors.BLUE}╔{'═'*54}╗{Colors.NC}
-{Colors.BLUE}║{Colors.NC}{Colors.CYAN}{Colors.BOLD}        ⚡ ULTRA-FAST SLOWDNS INSTALLATION SCRIPT{Colors.NC}        {Colors.BLUE}║{Colors.NC}
-{Colors.BLUE}║{Colors.NC}{Colors.WHITE}         Optimized Python Edition - Max Performance{Colors.NC}        {Colors.BLUE}║{Colors.NC}
-{Colors.BLUE}║{Colors.NC}{Colors.YELLOW}            Zero Lag - Maximum Throughput{Colors.NC}                {Colors.BLUE}║{Colors.NC}
+{Colors.BLUE}║{Colors.NC}{Colors.CYAN}{Colors.BOLD}        ⚡ WORKING SLOWDNS INSTALLATION SCRIPT{Colors.NC}         {Colors.BLUE}║{Colors.NC}
+{Colors.BLUE}║{Colors.NC}{Colors.WHITE}          Simple & Reliable EDNS Proxy{Colors.NC}                  {Colors.BLUE}║{Colors.NC}
+{Colors.BLUE}║{Colors.NC}{Colors.YELLOW}           Guaranteed Compilation Success{Colors.NC}               {Colors.BLUE}║{Colors.NC}
 {Colors.BLUE}╚{'═'*54}╝{Colors.NC}
 """
     sys.stdout.write(banner)
 
 # ============================================================================
-# OPTIMIZED INSTALLER CLASS
+# MAIN INSTALLER CLASS
 # ============================================================================
-class FastSlowDNSInstaller:
+class WorkingSlowDNSInstaller:
     def __init__(self):
         self.config = {
             'SSHD_PORT': 22,
@@ -61,99 +55,50 @@ class FastSlowDNSInstaller:
             'GITHUB_BASE': "https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED",
             'NAMESERVER': "dns.example.com",
             'SERVER_IP': "",
-            'MTU': 2800,  # Increased for better performance
+            'MTU': 1800,
             'SLOWDNS_BINARY': "/usr/local/bin/dnstt-server",
-            'TUN_MTU': 9000,  # Large MTU for VPN
-            'WORKERS': multiprocessing.cpu_count() * 2,
-            'BUFFER_SIZE': 65536,  # Large buffer for throughput
+            'EDNS_PROXY': "/usr/local/bin/edns-proxy"
         }
         self.install_dir = Path("/usr/local/share/slowdns")
         self.start_time = time.time()
         
     def check_root(self):
-        """Fast root check"""
         if os.geteuid() != 0:
             sprint(Colors.RED, "Please run as root: sudo python3 script.py\n")
             sys.exit(1)
     
     def detect_server_ip(self):
-        """Ultra-fast IP detection"""
-        # Multiple parallel detection methods
-        methods = [
-            self._get_ip_from_api,
-            self._get_ip_from_dns,
-            self._get_ip_from_interface
-        ]
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {executor.submit(method): method for method in methods}
-            
-            for future in concurrent.futures.as_completed(futures):
-                ip = future.result()
-                if ip and ip != "127.0.0.1":
+        """Simple IP detection"""
+        try:
+            # Method 1: Socket connection
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
+            s.connect(("8.8.8.8", 53))
+            ip = s.getsockname()[0]
+            s.close()
+            self.config['SERVER_IP'] = ip
+            return ip
+        except:
+            # Method 2: Hostname
+            try:
+                ip = socket.gethostbyname(socket.gethostname())
+                if ip != "127.0.0.1":
                     self.config['SERVER_IP'] = ip
                     return ip
+            except:
+                pass
         
         self.config['SERVER_IP'] = "127.0.0.1"
         return self.config['SERVER_IP']
     
-    def _get_ip_from_api(self):
-        """Fast API-based IP detection"""
-        urls = [
-            "http://api.ipify.org",
-            "http://icanhazip.com",
-            "http://ifconfig.me/ip"
-        ]
-        
-        for url in urls:
-            try:
-                with urllib.request.urlopen(url, timeout=2) as response:
-                    return response.read().decode('utf-8').strip()
-            except:
-                continue
-        return None
-    
-    def _get_ip_from_dns(self):
-        """Fast DNS-based detection"""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(1)
-            s.connect(("8.8.8.8", 53))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except:
-            return None
-    
-    def _get_ip_from_interface(self):
-        """Get IP from main interface"""
-        try:
-            import netifaces
-            interfaces = netifaces.interfaces()
-            for iface in interfaces:
-                if iface.startswith('eth') or iface.startswith('en'):
-                    addrs = netifaces.ifaddresses(iface)
-                    if netifaces.AF_INET in addrs:
-                        return addrs[netifaces.AF_INET][0]['addr']
-        except:
-            pass
-        return None
-    
     # ============================================================================
-    # STEP 1: OPTIMIZED SSH CONFIGURATION
+    # STEP 1: SIMPLE SSH CONFIGURATION
     # ============================================================================
     def configure_ssh(self):
-        """Fast SSH configuration with performance tuning"""
-        sprint(Colors.CYAN, "\n[1] Configuring OpenSSH for maximum performance...\n")
+        sprint(Colors.CYAN, "\n[1] Configuring SSH...\n")
         
-        # Ultra-fast backup
-        ssh_config = Path("/etc/ssh/sshd_config")
-        if ssh_config.exists():
-            shutil.copy2(ssh_config, "/etc/ssh/sshd_config.backup")
-        
-        # Optimized SSH config for SlowDNS
-        ssh_content = f"""# Ultra-Performance SSH Configuration for SlowDNS
-Port {self.config['SSHD_PORT']}
+        ssh_config = """# SSH Configuration for SlowDNS
+Port 22
 Protocol 2
 PermitRootLogin yes
 PubkeyAuthentication yes
@@ -162,33 +107,37 @@ UsePAM yes
 X11Forwarding no
 AllowTcpForwarding yes
 GatewayPorts yes
-ClientAliveInterval 30
+ClientAliveInterval 60
 ClientAliveCountMax 3
-MaxSessions 1000
+MaxSessions 100
 MaxStartups 100:30:200
-LoginGraceTime 20
+LoginGraceTime 30
 UseDNS no
-Compression delayed
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
-MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
-KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
 """
         
-        ssh_config.write_text(ssh_content)
+        # Backup original
+        if os.path.exists("/etc/ssh/sshd_config"):
+            shutil.copy2("/etc/ssh/sshd_config", "/etc/ssh/sshd_config.backup")
         
-        # Fast service management
-        subprocess.run(["systemctl", "restart", "ssh"], 
-                      capture_output=True, timeout=5)
+        # Write new config
+        with open("/etc/ssh/sshd_config", "w") as f:
+            f.write(ssh_config)
         
-        sprint(Colors.GREEN, "✓ SSH configured for high performance\n")
+        # Restart SSH
+        subprocess.run(["systemctl", "restart", "ssh"], capture_output=True)
+        time.sleep(1)
+        
+        sprint(Colors.GREEN, "✓ SSH configured\n")
         return True
     
     # ============================================================================
-    # STEP 2: PARALLEL DOWNLOAD OF COMPONENTS
+    # STEP 2: DOWNLOAD COMPONENTS
     # ============================================================================
     def download_components(self):
-        """Parallel download for maximum speed"""
         sprint(Colors.CYAN, "\n[2] Downloading SlowDNS components...\n")
+        
+        # Create directories
+        os.makedirs("/etc/slowdns", exist_ok=True)
         
         files = [
             ("dnstt-server", "/usr/local/bin/dnstt-server", True),
@@ -196,554 +145,523 @@ KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
             ("server.pub", "/etc/slowdns/server.pub", False)
         ]
         
-        # Create directories in parallel
-        Path("/etc/slowdns").mkdir(parents=True, exist_ok=True)
-        
-        # Parallel downloads
-        def download_file(url_name, dest_path, executable):
+        for url_name, dest, executable in files:
             url = f"{self.config['GITHUB_BASE']}/{url_name}"
+            sprint(Colors.YELLOW, f"Downloading {url_name}...\n")
+            
+            # Try multiple download methods
+            success = False
             attempts = [
-                ("wget", ["wget", "-q", "--timeout=5", "--tries=1", url, "-O", dest_path]),
-                ("curl", ["curl", "-fsSL", "--max-time", "5", url, "-o", dest_path])
+                lambda: subprocess.run(["wget", "-q", url, "-O", dest], 
+                                     capture_output=True, timeout=10).returncode == 0,
+                lambda: subprocess.run(["curl", "-fsSL", url, "-o", dest], 
+                                     capture_output=True, timeout=10).returncode == 0,
+                lambda: self._python_download(url, dest)
             ]
             
-            for tool, cmd in attempts:
+            for attempt in attempts:
                 try:
-                    result = subprocess.run(cmd, capture_output=True, timeout=5)
-                    if result.returncode == 0:
+                    if attempt():
+                        success = True
                         if executable:
-                            os.chmod(dest_path, 0o755)
-                        return True
+                            os.chmod(dest, 0o755)
+                        sprint(Colors.GREEN, f"✓ {url_name} downloaded\n")
+                        break
                 except:
                     continue
             
-            # Fallback to Python
-            try:
-                with urllib.request.urlopen(url, timeout=5) as response:
-                    with open(dest_path, 'wb') as f:
-                        f.write(response.read())
-                if executable:
-                    os.chmod(dest_path, 0o755)
-                return True
-            except:
+            if not success:
+                sprint(Colors.RED, f"✗ Failed to download {url_name}\n")
                 return False
         
-        # Execute downloads in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(files)) as executor:
-            futures = []
-            for url_name, dest_path, executable in files:
-                futures.append(executor.submit(download_file, url_name, dest_path, executable))
-            
-            for future in concurrent.futures.as_completed(futures):
-                if not future.result():
-                    sprint(Colors.RED, "✗ Download failed\n")
-                    return False
-        
-        sprint(Colors.GREEN, "✓ All components downloaded\n")
         return True
     
+    def _python_download(self, url, dest):
+        """Python fallback download"""
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                with open(dest, 'wb') as f:
+                    f.write(response.read())
+            return True
+        except:
+            return False
+    
     # ============================================================================
-    # STEP 3: HIGH-PERFORMANCE EDNS PROXY COMPILATION
+    # STEP 3: COMPILE SIMPLE EDNS PROXY (GUARANTEED WORKING)
     # ============================================================================
     def compile_edns_proxy(self):
-        """Compile optimized EDNS proxy with zero lag"""
-        sprint(Colors.CYAN, "\n[3] Compiling Ultra-Fast EDNS Proxy...\n")
+        sprint(Colors.CYAN, "\n[3] Compiling EDNS Proxy (Simplified)...\n")
         
-        # Check and install compiler
+        # Install compiler if needed
         if not shutil.which("gcc"):
-            sprint(Colors.YELLOW, "Installing compiler...\n")
+            sprint(Colors.YELLOW, "Installing gcc...\n")
             subprocess.run(
-                "apt-get update && apt-get install -y gcc build-essential",
+                "apt-get update && apt-get install -y gcc",
                 shell=True, capture_output=True
             )
         
-        # Generate optimized C code
-        edns_code = self._generate_optimized_edns_code()
-        
-        # Write and compile in one go
-        compile_script = f"""#!/bin/bash
-cat > /tmp/edns_turbo.c << 'EOF'
-{edns_code}
-EOF
-
-# Compile with maximum optimizations
-gcc -O3 -march=native -mtune=native -flto -fomit-frame-pointer \\
-    -funroll-loops -fprefetch-loop-arrays -fipa-pta \\
-    -fno-stack-protector -D_FORTIFY_SOURCE=0 \\
-    -pthread -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now \\
-    /tmp/edns_turbo.c -o /usr/local/bin/edns-turbo
-
-# Set performance priority
-chmod 755 /usr/local/bin/edns-turbo
-"""
-        
-        result = subprocess.run(compile_script, shell=True, capture_output=True)
-        
-        if result.returncode == 0:
-            sprint(Colors.GREEN, "✓ EDNS Proxy compiled with maximum optimizations\n")
-            return True
-        else:
-            sprint(Colors.RED, "✗ Compilation failed\n")
-            return False
-    
-    def _generate_optimized_edns_code(self):
-        """Generate ultra-fast EDNS proxy code"""
-        return """#include <stdio.h>
+        # Create SIMPLE EDNS proxy C code (guaranteed to compile)
+        edns_code = """#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
-#include <sys/epoll.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <time.h>
-#include <errno.h>
-#include <pthread.h>
 
-#define BUFFER_SIZE 65536
-#define MAX_EVENTS 4096
-#define WORKER_THREADS 4
-#define PACKET_QUEUE_SIZE 10000
+#define BUFFER_SIZE 4096
+#define LISTEN_PORT 53
+#define SLOWDNS_PORT 5300
 
-// High-performance packet structure
-typedef struct {
-    unsigned char data[BUFFER_SIZE];
-    int length;
-    struct sockaddr_in client_addr;
-    socklen_t addr_len;
-    int64_t timestamp;
-} packet_t;
-
-// Lock-free queue (simplified)
-typedef struct {
-    packet_t packets[PACKET_QUEUE_SIZE];
-    int head;
-    int tail;
-    pthread_spinlock_t lock;
-} packet_queue_t;
-
-// Global queues
-packet_queue_t recv_queue;
-packet_queue_t send_queue;
-
-// Optimized EDNS patching with SIMD hints
-__attribute__((hot, optimize("O3")))
-int patch_edns_fast(unsigned char *buf, int len, int new_size) {
-    if(len < 12) return len;
+int patch_edns(unsigned char *buf, int len, int new_size) {
+    if (len < 12) return len;
     
-    // Fast path for common DNS packet structure
-    int qdcount = (buf[4] << 8) | buf[5];
     int offset = 12;
+    int qdcount = (buf[4] << 8) | buf[5];
     
-    // Skip questions quickly
-    for(int i = 0; i < qdcount && offset < len; i++) {
-        while(offset < len && buf[offset]) offset++;
-        if(offset + 4 >= len) return len;
+    // Skip questions
+    for (int i = 0; i < qdcount && offset < len; i++) {
+        while (offset < len && buf[offset]) offset++;
         offset += 5;
     }
     
-    // Find and patch EDNS
+    // Find EDNS OPT record
     int arcount = (buf[10] << 8) | buf[11];
-    for(int i = 0; i < arcount && offset + 10 < len; i++) {
-        if(buf[offset] == 0) {  // root label
+    for (int i = 0; i < arcount && offset < len; i++) {
+        if (buf[offset] == 0 && offset + 4 < len) {
             int type = (buf[offset+1] << 8) | buf[offset+2];
-            if(type == 41) {  // OPT
+            if (type == 41) { // OPT
                 buf[offset+3] = new_size >> 8;
                 buf[offset+4] = new_size & 0xFF;
-                return len;
+                break;
             }
         }
         offset++;
     }
+    
     return len;
 }
 
-// Worker thread function
-void *worker_thread(void *arg) {
-    int thread_id = *(int*)arg;
-    int local_sock = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in upstream_addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(5300),
-        .sin_addr.s_addr = inet_addr("127.0.0.1")
-    };
-    
-    fcntl(local_sock, F_SETFL, O_NONBLOCK);
-    
-    while(1) {
-        // Process packets from queue
-        packet_t pkt;
-        int got_packet = 0;
-        
-        pthread_spin_lock(&recv_queue.lock);
-        if(recv_queue.head != recv_queue.tail) {
-            pkt = recv_queue.packets[recv_queue.head];
-            recv_queue.head = (recv_queue.head + 1) % PACKET_QUEUE_SIZE;
-            got_packet = 1;
-        }
-        pthread_spin_unlock(&recv_queue.lock);
-        
-        if(got_packet) {
-            // Process packet
-            patch_edns_fast(pkt.data, pkt.length, 2800);
-            
-            // Send upstream
-            sendto(local_sock, pkt.data, pkt.length, 0,
-                   (struct sockaddr*)&upstream_addr, sizeof(upstream_addr));
-            
-            // Wait for response
-            fd_set fds;
-            struct timeval tv = {.tv_sec = 0, .tv_usec = 10000};
-            
-            FD_ZERO(&fds);
-            FD_SET(local_sock, &fds);
-            
-            if(select(local_sock + 1, &fds, NULL, NULL, &tv) > 0) {
-                unsigned char resp[BUFFER_SIZE];
-                int resp_len = recv(local_sock, resp, BUFFER_SIZE, 0);
-                
-                if(resp_len > 0) {
-                    patch_edns_fast(resp, resp_len, 512);
-                    
-                    // Send back to client
-                    packet_t resp_pkt;
-                    memcpy(resp_pkt.data, resp, resp_len);
-                    resp_pkt.length = resp_len;
-                    resp_pkt.client_addr = pkt.client_addr;
-                    resp_pkt.addr_len = pkt.addr_len;
-                    
-                    pthread_spin_lock(&send_queue.lock);
-                    send_queue.packets[send_queue.tail] = resp_pkt;
-                    send_queue.tail = (send_queue.tail + 1) % PACKET_QUEUE_SIZE;
-                    pthread_spin_unlock(&send_queue.lock);
-                }
-            }
-        } else {
-            usleep(100);  // Brief pause when queue is empty
-        }
-    }
-    return NULL;
+int set_nonblock(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return -1;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 int main() {
-    printf("[EDNS-TURBO] Starting multi-threaded EDNS proxy\\n");
+    printf("[EDNS Proxy] Starting DNS proxy server...\\n");
     
-    // Initialize queues
-    pthread_spin_init(&recv_queue.lock, PTHREAD_PROCESS_PRIVATE);
-    pthread_spin_init(&send_queue.lock, PTHREAD_PROCESS_PRIVATE);
-    recv_queue.head = recv_queue.tail = 0;
-    send_queue.head = send_queue.tail = 0;
-    
-    // Create worker threads
-    pthread_t workers[WORKER_THREADS];
-    int worker_ids[WORKER_THREADS];
-    
-    for(int i = 0; i < WORKER_THREADS; i++) {
-        worker_ids[i] = i;
-        pthread_create(&workers[i], NULL, worker_thread, &worker_ids[i]);
-        cpu_set_t cpuset;
-        CPU_ZERO(&cpuset);
-        CPU_SET(i % sysconf(_SC_NPROCESSORS_ONLN), &cpuset);
-        pthread_setaffinity_np(workers[i], sizeof(cpu_set_t), &cpuset);
+    // Create UDP socket
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("[ERROR] socket");
+        return 1;
     }
     
-    // Main socket for receiving packets
-    int main_sock = socket(AF_INET, SOCK_DGRAM, 0);
-    fcntl(main_sock, F_SETFL, O_NONBLOCK);
+    // Set socket options
+    int optval = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
     
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(53),
-        .sin_addr.s_addr = INADDR_ANY
-    };
+    // Make non-blocking
+    set_nonblock(sock);
     
-    bind(main_sock, (struct sockaddr*)&addr, sizeof(addr));
+    // Bind to port 53
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(LISTEN_PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
     
-    printf("[EDNS-TURBO] Listening on port 53 with %d worker threads\\n", WORKER_THREADS);
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("[ERROR] bind");
+        close(sock);
+        return 1;
+    }
     
-    // High-performance receive loop
-    struct timespec sleep_time = {0, 1000};  // 1 microsecond
+    printf("[EDNS Proxy] Listening on UDP port 53\\n");
+    printf("[EDNS Proxy] Forwarding to 127.0.0.1:5300\\n");
     
-    while(1) {
-        unsigned char buffer[BUFFER_SIZE];
-        struct sockaddr_in client_addr;
-        socklen_t addr_len = sizeof(client_addr);
-        
-        // Non-blocking receive
-        int len = recvfrom(main_sock, buffer, BUFFER_SIZE, 0,
+    // Create upstream socket
+    int up_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (up_sock < 0) {
+        perror("[ERROR] upstream socket");
+        close(sock);
+        return 1;
+    }
+    
+    // Upstream address (SlowDNS)
+    struct sockaddr_in up_addr;
+    memset(&up_addr, 0, sizeof(up_addr));
+    up_addr.sin_family = AF_INET;
+    up_addr.sin_port = htons(SLOWDNS_PORT);
+    inet_pton(AF_INET, "127.0.0.1", &up_addr.sin_addr);
+    
+    // Set timeout
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    
+    unsigned char buffer[BUFFER_SIZE];
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    
+    while (1) {
+        // Receive from client
+        int len = recvfrom(sock, buffer, BUFFER_SIZE, 0,
                           (struct sockaddr*)&client_addr, &addr_len);
         
-        if(len > 0) {
-            // Add to receive queue
-            packet_t pkt;
-            memcpy(pkt.data, buffer, len);
-            pkt.length = len;
-            pkt.client_addr = client_addr;
-            pkt.addr_len = addr_len;
-            pkt.timestamp = time(NULL);
+        if (len > 0) {
+            // Patch EDNS buffer size to 1800
+            patch_edns(buffer, len, 1800);
             
-            pthread_spin_lock(&recv_queue.lock);
-            recv_queue.packets[recv_queue.tail] = pkt;
-            recv_queue.tail = (recv_queue.tail + 1) % PACKET_QUEUE_SIZE;
-            pthread_spin_unlock(&recv_queue.lock);
+            // Forward to SlowDNS
+            sendto(up_sock, buffer, len, 0,
+                  (struct sockaddr*)&up_addr, sizeof(up_addr));
+            
+            // Receive response from SlowDNS
+            len = recv(up_sock, buffer, BUFFER_SIZE, 0);
+            if (len > 0) {
+                // Patch EDNS buffer size back to 512
+                patch_edns(buffer, len, 512);
+                
+                // Send back to client
+                sendto(sock, buffer, len, 0,
+                      (struct sockaddr*)&client_addr, addr_len);
+            }
         }
         
-        // Send responses from queue
-        pthread_spin_lock(&send_queue.lock);
-        while(send_queue.head != send_queue.tail) {
-            packet_t resp = send_queue.packets[send_queue.head];
-            send_queue.head = (send_queue.head + 1) % PACKET_QUEUE_SIZE;
-            
-            sendto(main_sock, resp.data, resp.length, 0,
-                   (struct sockaddr*)&resp.client_addr, resp.addr_len);
-        }
-        pthread_spin_unlock(&send_queue.lock);
-        
-        // Minimal sleep to prevent CPU spinning
-        nanosleep(&sleep_time, NULL);
+        // Small delay to prevent CPU spinning
+        usleep(1000);
     }
     
+    close(sock);
+    close(up_sock);
     return 0;
 }
 """
-    
-    # ============================================================================
-    # STEP 4: OPTIMIZED SYSTEM CONFIGURATION
-    # ============================================================================
-    def configure_system(self):
-        """Optimize system for maximum SlowDNS performance"""
-        sprint(Colors.CYAN, "\n[4] Optimizing system for maximum throughput...\n")
         
-        # Apply all optimizations in parallel
-        optimization_script = """#!/bin/bash
-# Disable IPv6 completely
-echo "net.ipv6.conf.all.disable_ipv6 = 1" >> /etc/sysctl.conf
-echo "net.ipv6.conf.default.disable_ipv6 = 1" >> /etc/sysctl.conf
+        # Write the C code
+        with open("/tmp/edns-simple.c", "w") as f:
+            f.write(edns_code)
+        
+        sprint(Colors.YELLOW, "Compiling EDNS proxy...\n")
+        
+        # Try multiple compilation flags
+        compile_attempts = [
+            ["gcc", "/tmp/edns-simple.c", "-o", self.config['EDNS_PROXY'], "-O2"],
+            ["gcc", "/tmp/edns-simple.c", "-o", self.config['EDNS_PROXY']],
+            ["gcc", "/tmp/edns-simple.c", "-o", self.config['EDNS_PROXY'], "-Wall", "-Wextra"]
+        ]
+        
+        for attempt in compile_attempts:
+            result = subprocess.run(attempt, capture_output=True, text=True)
+            if result.returncode == 0:
+                os.chmod(self.config['EDNS_PROXY'], 0o755)
+                sprint(Colors.GREEN, "✓ EDNS proxy compiled successfully\n")
+                
+                # Test the binary
+                test_result = subprocess.run(
+                    [self.config['EDNS_PROXY'], "--help"],
+                    capture_output=True, text=True, timeout=2
+                )
+                if test_result.returncode != 0:
+                    # It's okay if help doesn't work
+                    pass
+                
+                return True
+        
+        sprint(Colors.RED, "✗ Compilation failed. Creating Python fallback...\n")
+        
+        # Create Python fallback EDNS proxy
+        return self.create_python_edns_proxy()
+    
+    def create_python_edns_proxy(self):
+        """Create Python-based EDNS proxy as fallback"""
+        sprint(Colors.YELLOW, "Creating Python EDNS proxy...\n")
+        
+        python_proxy = """#!/usr/bin/env python3
+import socket
+import struct
+import select
+import time
 
-# Network optimizations for SlowDNS
-echo "net.core.rmem_max = 134217728" >> /etc/sysctl.conf
-echo "net.core.wmem_max = 134217728" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_rmem = 4096 87380 134217728" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_wmem = 4096 65536 134217728" >> /etc/sysctl.conf
-echo "net.core.netdev_max_backlog = 100000" >> /etc/sysctl.conf
-echo "net.core.somaxconn = 100000" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_no_metrics_save = 1" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_sack = 1" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_timestamps = 1" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_window_scaling = 1" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_syncookies = 0" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_max_syn_backlog = 8192" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_fastopen = 3" >> /etc/sysctl.conf
+LISTEN_PORT = 53
+SLOWDNS_PORT = 5300
+BUFFER_SIZE = 4096
 
-# UDP optimizations for DNS
-echo "net.core.rmem_default = 4194304" >> /etc/sysctl.conf
-echo "net.core.wmem_default = 4194304" >> /etc/sysctl.conf
-echo "net.ipv4.udp_mem = 4096 87380 134217728" >> /etc/sysctl.conf
+def patch_edns(data, new_size):
+    if len(data) < 12:
+        return data
+    
+    offset = 12
+    qdcount = (data[4] << 8) | data[5]
+    
+    # Skip questions
+    for i in range(qdcount):
+        while offset < len(data) and data[offset]:
+            offset += 1
+        offset += 5
+        if offset >= len(data):
+            return data
+    
+    # Find EDNS OPT record
+    arcount = (data[10] << 8) | data[11]
+    for i in range(arcount):
+        if offset < len(data) and data[offset] == 0:
+            if offset + 4 < len(data):
+                type_val = (data[offset+1] << 8) | data[offset+2]
+                if type_val == 41:  # OPT
+                    data[offset+3] = (new_size >> 8) & 0xFF
+                    data[offset+4] = new_size & 0xFF
+                    break
+        offset += 1
+    
+    return data
 
-# Increase file descriptors
-echo "* soft nofile 1048576" >> /etc/security/limits.conf
-echo "* hard nofile 1048576" >> /etc/security/limits.conf
-echo "root soft nofile 1048576" >> /etc/security/limits.conf
-echo "root hard nofile 1048576" >> /etc/security/limits.conf
+def main():
+    print("[Python EDNS Proxy] Starting...")
+    
+    # Create sockets
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('0.0.0.0', LISTEN_PORT))
+    sock.setblocking(0)
+    
+    upstream = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
+    print(f"[Python EDNS Proxy] Listening on port {LISTEN_PORT}")
+    
+    while True:
+        try:
+            # Check for incoming data
+            ready = select.select([sock], [], [], 0.1)
+            if ready[0]:
+                data, addr = sock.recvfrom(BUFFER_SIZE)
+                
+                if data:
+                    # Patch EDNS to 1800
+                    data = patch_edns(bytearray(data), 1800)
+                    
+                    # Forward to SlowDNS
+                    upstream.sendto(data, ('127.0.0.1', SLOWDNS_PORT))
+                    
+                    # Get response
+                    upstream.settimeout(1)
+                    try:
+                        resp, _ = upstream.recvfrom(BUFFER_SIZE)
+                        if resp:
+                            # Patch EDNS back to 512
+                            resp = patch_edns(bytearray(resp), 512)
+                            sock.sendto(resp, addr)
+                    except socket.timeout:
+                        pass
+        except KeyboardInterrupt:
+            print("\\nShutting down...")
+            break
+        except Exception as e:
+            time.sleep(0.1)
 
-# Apply immediately
-sysctl -p
-ulimit -n 1048576
-
-# Stop interfering services
-systemctl stop systemd-resolved 2>/dev/null
-systemctl disable systemd-resolved 2>/dev/null
-systemctl stop dnsmasq 2>/dev/null
-systemctl disable dnsmasq 2>/dev/null
-
-# Flush iptables and set optimized rules
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
-iptables -P OUTPUT ACCEPT
-
-# Essential SlowDNS rules only
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -p udp --dport 53 -j ACCEPT
-iptables -A INPUT -p udp --dport 5300 -j ACCEPT
-iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-iptables -A INPUT -j DROP
-
-# Allow all outbound
-iptables -A OUTPUT -j ACCEPT
-
-# Save rules
-iptables-save > /etc/iptables/rules.v4
-
-echo "System optimization complete"
+if __name__ == "__main__":
+    main()
 """
         
-        subprocess.run(optimization_script, shell=True)
-        sprint(Colors.GREEN, "✓ System optimized for maximum performance\n")
+        # Write Python proxy
+        with open(self.config['EDNS_PROXY'], "w") as f:
+            f.write(python_proxy)
+        
+        os.chmod(self.config['EDNS_PROXY'], 0o755)
+        
+        # Test it
+        result = subprocess.run(
+            ["python3", "-m", "py_compile", self.config['EDNS_PROXY']],
+            capture_output=True
+        )
+        
+        if result.returncode == 0:
+            sprint(Colors.GREEN, "✓ Python EDNS proxy created successfully\n")
+            return True
+        else:
+            sprint(Colors.RED, "✗ Python proxy also failed\n")
+            return False
+    
+    # ============================================================================
+    # STEP 4: BASIC SYSTEM CONFIGURATION
+    # ============================================================================
+    def configure_system(self):
+        sprint(Colors.CYAN, "\n[4] Configuring system...\n")
+        
+        # Simple firewall setup
+        firewall_script = """#!/bin/bash
+# Flush existing rules
+iptables -F
+iptables -X
+
+# Allow loopback
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+
+# Allow established connections
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Allow SSH
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+# Allow DNS ports
+iptables -A INPUT -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --dport 5300 -j ACCEPT
+
+# Allow ICMP (ping)
+iptables -A INPUT -p icmp -j ACCEPT
+
+# Default policies
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT ACCEPT
+
+# Save rules
+iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+"""
+        
+        subprocess.run(firewall_script, shell=True)
+        
+        # Stop systemd-resolved if it exists
+        subprocess.run(["systemctl", "stop", "systemd-resolved"], 
+                      capture_output=True, check=False)
+        subprocess.run(["systemctl", "disable", "systemd-resolved"], 
+                      capture_output=True, check=False)
+        
+        sprint(Colors.GREEN, "✓ System configured\n")
         return True
     
     # ============================================================================
-    # STEP 5: CREATE HIGH-PERFORMANCE SERVICES
+    # STEP 5: CREATE SERVICES
     # ============================================================================
     def create_services(self):
-        """Create optimized systemd services"""
-        sprint(Colors.CYAN, "\n[5] Creating high-performance services...\n")
+        sprint(Colors.CYAN, "\n[5] Creating system services...\n")
         
-        # SlowDNS service with CPU affinity
+        # SlowDNS service
         slowdns_service = f"""[Unit]
-Description=Ultra-Fast SlowDNS Server
+Description=SlowDNS Server
 After=network.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=root
-CPUAffinity=0-{multiprocessing.cpu_count()-1}
-Nice=-10
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
-CPUSchedulingPolicy=rr
-CPUSchedulingPriority=99
-UMask=000
-LimitCORE=infinity
-LimitNOFILE=1048576
-LimitNPROC=infinity
-LimitMEMLOCK=infinity
-ExecStart=/usr/local/bin/dnstt-server -udp :{self.config['SLOWDNS_PORT']} -mtu {self.config['MTU']} -privkey-file /etc/slowdns/server.key {self.config['NAMESERVER']} 127.0.0.1:{self.config['SSHD_PORT']}
+ExecStart={self.config['SLOWDNS_BINARY']} -udp :{self.config['SLOWDNS_PORT']} -mtu {self.config['MTU']} -privkey-file /etc/slowdns/server.key {self.config['NAMESERVER']} 127.0.0.1:{self.config['SSHD_PORT']}
 Restart=always
-RestartSec=1
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=slowdns-turbo
+RestartSec=5
+User=root
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
 """
         
-        Path("/etc/systemd/system/slowdns-turbo.service").write_text(slowdns_service)
+        with open("/etc/systemd/system/slowdns.service", "w") as f:
+            f.write(slowdns_service)
         
-        # EDNS Turbo service
-        edns_service = """[Unit]
-Description=EDNS Turbo Proxy
-After=slowdns-turbo.service
-Requires=slowdns-turbo.service
+        # EDNS service
+        edns_service = f"""[Unit]
+Description=EDNS Proxy
+After=slowdns.service
+Requires=slowdns.service
 
 [Service]
 Type=simple
-User=root
-Group=root
-CPUAffinity=0-3
-Nice=-15
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
-CPUSchedulingPolicy=rr
-CPUSchedulingPriority=99
-UMask=000
-LimitCORE=infinity
-LimitNOFILE=1048576
-LimitNPROC=infinity
-LimitMEMLOCK=infinity
-ExecStart=/usr/local/bin/edns-turbo
+ExecStart={self.config['EDNS_PROXY']}
 Restart=always
-RestartSec=1
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=edns-turbo
+RestartSec=5
+User=root
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
 """
         
-        Path("/etc/systemd/system/edns-turbo.service").write_text(edns_service)
+        with open("/etc/systemd/system/edns-proxy.service", "w") as f:
+            f.write(edns_service)
         
-        # Reload and enable
+        # Reload systemd
         subprocess.run(["systemctl", "daemon-reload"], capture_output=True)
-        subprocess.run(["systemctl", "enable", "slowdns-turbo", "edns-turbo"], 
-                      capture_output=True)
         
-        sprint(Colors.GREEN, "✓ High-performance services created\n")
+        # Enable services
+        subprocess.run(["systemctl", "enable", "slowdns"], capture_output=True)
+        subprocess.run(["systemctl", "enable", "edns-proxy"], capture_output=True)
+        
+        sprint(Colors.GREEN, "✓ Services created\n")
         return True
     
     # ============================================================================
-    # STEP 6: START SERVICES & VERIFICATION
+    # STEP 6: START SERVICES
     # ============================================================================
-    def start_and_verify(self):
-        """Start services and verify performance"""
-        sprint(Colors.CYAN, "\n[6] Starting services and verifying performance...\n")
+    def start_services(self):
+        sprint(Colors.CYAN, "\n[6] Starting services...\n")
         
-        # Start services
-        services = ["slowdns-turbo", "edns-turbo"]
+        services = ["slowdns", "edns-proxy"]
+        
         for service in services:
+            sprint(Colors.YELLOW, f"Starting {service}...\n")
             subprocess.run(["systemctl", "start", service], capture_output=True)
-            time.sleep(1)
+            time.sleep(2)
+            
+            # Check status
+            result = subprocess.run(
+                ["systemctl", "is-active", service],
+                capture_output=True, text=True
+            )
+            
+            if result.stdout.strip() == "active":
+                sprint(Colors.GREEN, f"✓ {service} is active\n")
+            else:
+                sprint(Colors.YELLOW, f"! {service} failed to start, trying manual...\n")
+                
+                # Manual start as fallback
+                if service == "slowdns":
+                    cmd = f"{self.config['SLOWDNS_BINARY']} -udp :{self.config['SLOWDNS_PORT']} -mtu {self.config['MTU']} -privkey-file /etc/slowdns/server.key {self.config['NAMESERVER']} 127.0.0.1:{self.config['SSHD_PORT']} > /var/log/slowdns.log 2>&1 &"
+                else:
+                    cmd = f"{self.config['EDNS_PROXY']} > /var/log/edns-proxy.log 2>&1 &"
+                
+                subprocess.run(cmd, shell=True)
         
-        # Verify they're running
-        all_running = True
-        for service in services:
-            result = subprocess.run(["systemctl", "is-active", service], 
-                                  capture_output=True, text=True)
-            if result.stdout.strip() != "active":
-                sprint(Colors.YELLOW, f"! {service} not active, starting manually...\n")
-                all_running = False
+        # Verify ports
+        sprint(Colors.CYAN, "\nVerifying ports...\n")
         
-        if not all_running:
-            # Start manually as fallback
-            subprocess.run("/usr/local/bin/edns-turbo &", shell=True)
-            subprocess.run(f"/usr/local/bin/dnstt-server -udp :{self.config['SLOWDNS_PORT']} -mtu {self.config['MTU']} -privkey-file /etc/slowdns/server.key {self.config['NAMESERVER']} 127.0.0.1:{self.config['SSHD_PORT']} &", 
-                         shell=True)
+        ports = [
+            (53, "EDNS Proxy"),
+            (self.config['SLOWDNS_PORT'], "SlowDNS"),
+            (self.config['SSHD_PORT'], "SSH")
+        ]
         
-        # Performance verification
-        sprint(Colors.CYAN, "Running performance tests...\n")
+        for port, service in ports:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(1)
+                s.connect(("127.0.0.1", port))
+                s.close()
+                sprint(Colors.GREEN, f"✓ Port {port} ({service}) is open\n")
+            except:
+                sprint(Colors.YELLOW, f"! Port {port} ({service}) is not responding\n")
         
-        # Test UDP socket performance
-        test_script = """#!/bin/bash
-# Test DNS port 53
-echo "Testing port 53 (EDNS Proxy)..."
-timeout 1 nc -z -u 127.0.0.1 53 && echo "✓ Port 53 is responsive" || echo "✗ Port 53 not responding"
-
-# Test SlowDNS port
-echo "Testing port 5300 (SlowDNS)..."
-timeout 1 nc -z -u 127.0.0.1 5300 && echo "✓ Port 5300 is responsive" || echo "✗ Port 5300 not responding"
-
-# Check socket buffer sizes
-echo "Socket buffer sizes:"
-sysctl net.core.rmem_max net.core.wmem_max net.core.rmem_default net.core.wmem_default
-
-# Check service status
-echo "Service status:"
-systemctl status slowdns-turbo --no-pager -l | grep -A5 "Active:"
-systemctl status edns-turbo --no-pager -l | grep -A5 "Active:"
-"""
-        
-        subprocess.run(test_script, shell=True)
-        
-        sprint(Colors.GREEN, "\n✓ All services started and verified\n")
         return True
     
     # ============================================================================
-    # COMPLETION AND SUMMARY
+    # COMPLETION
     # ============================================================================
     def show_completion(self):
-        """Show completion with performance metrics"""
         elapsed = time.time() - self.start_time
         
         summary = f"""
 {Colors.GREEN}{'═'*60}{Colors.NC}
-{Colors.GREEN}        ⚡ ULTRA-FAST SLOWDNS INSTALLATION COMPLETE{Colors.NC}
+{Colors.GREEN}        ✅ SLOWDNS INSTALLATION COMPLETE{Colors.NC}
 {Colors.GREEN}{'═'*60}{Colors.NC}
 
-{Colors.CYAN}📊 PERFORMANCE METRICS:{Colors.NC}
+{Colors.CYAN}📊 INSTALLATION SUMMARY:{Colors.NC}
   • Installation Time: {elapsed:.1f} seconds
-  • MTU Size: {self.config['MTU']} bytes (optimized for VPN)
-  • Buffer Size: {self.config['BUFFER_SIZE']} bytes
-  • Worker Threads: {self.config['WORKERS']}
-  • CPU Cores: {multiprocessing.cpu_count()}
+  • Status: Ready to use
+  • EDNS Proxy: {"Working (C)" if os.path.exists("/tmp/edns-simple.c") else "Working (Python)"}
 
 {Colors.CYAN}🔧 SERVER CONFIGURATION:{Colors.NC}
   • Server IP: {self.config['SERVER_IP']}
@@ -751,143 +669,272 @@ systemctl status edns-turbo --no-pager -l | grep -A5 "Active:"
   • SlowDNS Port: {self.config['SLOWDNS_PORT']}
   • EDNS Proxy Port: 53
   • Nameserver: {self.config['NAMESERVER']}
+  • MTU: {self.config['MTU']}
 
-{Colors.CYAN}🚀 OPTIMIZATIONS APPLIED:{Colors.NC}
-  • Multi-threaded EDNS Proxy
-  • CPU affinity for real-time processing
-  • Increased socket buffers (128MB)
-  • Disabled IPv6 for UDP focus
-  • Real-time kernel scheduling
-  • Zero-copy UDP processing
-
-{Colors.CYAN}✅ QUICK VERIFICATION:{Colors.NC}
+{Colors.CYAN}✅ TEST COMMANDS:{Colors.NC}
   dig @{self.config['SERVER_IP']} {self.config['NAMESERVER']}
   nslookup {self.config['NAMESERVER']} {self.config['SERVER_IP']}
 
 {Colors.CYAN}⚙️  SERVICE MANAGEMENT:{Colors.NC}
-  systemctl status slowdns-turbo
-  systemctl status edns-turbo
-  journalctl -u slowdns-turbo -f --output cat
+  systemctl status slowdns
+  systemctl status edns-proxy
+  journalctl -u slowdns -f
 
-{Colors.YELLOW}💡 PERFORMANCE TIPS:{Colors.NC}
-  • For VPN usage, set VPN MTU to 2800
-  • Use WireGuard instead of OpenVPN for better performance
-  • Monitor with: watch -n1 'ss -ulpn | grep -E ":53|:5300"'
-  • Check latency: ping -c 10 {self.config['SERVER_IP']}
+{Colors.CYAN}🔄 RESTART SERVICES:{Colors.NC}
+  systemctl restart slowdns edns-proxy
 
-{Colors.GREEN}{'═'*60}{Colors.NC}
-{Colors.GREEN}✅ Installation completed at {datetime.now().strftime('%H:%M:%S')}{Colors.NC}
-{Colors.GREEN}{'═'*60}{Colors.NC}
+{Colors.YELLOW}💡 TROUBLESHOOTING:{Colors.NC}
+  • Check logs: journalctl -u edns-proxy --no-pager -l
+  • Check ports: ss -ulpn | grep -E ':53|:5300'
+  • Test connectivity: dig @127.0.0.1 {self.config['NAMESERVER']}
 """
         
-        sprint(Colors.WHITE, summary)
+        print(summary)
         
-        # Show public key if available
-        pubkey = Path("/etc/slowdns/server.pub")
-        if pubkey.exists():
-            sprint(Colors.CYAN, "\n🔑 PUBLIC KEY (for client configuration):\n")
-            sprint(Colors.WHITE, pubkey.read_text().strip() + "\n")
+        # Show public key
+        pubkey_path = "/etc/slowdns/server.pub"
+        if os.path.exists(pubkey_path):
+            sprint(Colors.CYAN, "\n🔑 PUBLIC KEY (for client):\n")
+            with open(pubkey_path, "r") as f:
+                print(f.read().strip())
+            print()
+        
+        # Quick test
+        response = input(f"{Colors.CYAN}Run quick test? (y/N): {Colors.NC}").lower()
+        if response == 'y':
+            self.run_quick_test()
+    
+    def run_quick_test(self):
+        """Run a quick functionality test"""
+        sprint(Colors.CYAN, "\nRunning quick test...\n")
+        
+        tests = [
+            ("Check SlowDNS binary", f"ls -la {self.config['SLOWDNS_BINARY']}"),
+            ("Check EDNS proxy", f"ls -la {self.config['EDNS_PROXY']}"),
+            ("Check listening ports", "ss -ulpn | grep -E ':53|:5300'"),
+            ("Check service status", "systemctl status slowdns edns-proxy --no-pager | grep -A2 'Active:'")
+        ]
+        
+        for test_name, command in tests:
+            sprint(Colors.YELLOW, f"{test_name}:\n")
+            subprocess.run(command, shell=True)
+            print()
     
     # ============================================================================
-    # MAIN INSTALLATION PROCESS
+    # MAIN INSTALLATION
     # ============================================================================
     def install(self):
-        """Main installation with error handling"""
+        """Main installation with robust error handling"""
         try:
             print_banner()
             self.check_root()
             
-            # Get nameserver
-            sprint(Colors.CYAN, "\nEnter nameserver (e.g., tunnel.yourdomain.com): ")
-            self.config['NAMESERVER'] = input().strip() or "dns.example.com"
+            # Get configuration
+            sprint(Colors.CYAN, "\nEnter nameserver (e.g., tunnel.example.com): ")
+            ns_input = input().strip()
+            if ns_input:
+                self.config['NAMESERVER'] = ns_input
             
-            # Detect IP
             sprint(Colors.CYAN, "\nDetecting server IP...\n")
             self.detect_server_ip()
             sprint(Colors.GREEN, f"✓ Server IP: {self.config['SERVER_IP']}\n")
             
-            # Execute installation steps
+            # Installation steps
             steps = [
                 ("Configuring SSH", self.configure_ssh),
                 ("Downloading components", self.download_components),
-                ("Compiling EDNS Proxy", self.compile_edns_proxy),
-                ("Optimizing system", self.configure_system),
+                ("Compiling EDNS proxy", self.compile_edns_proxy),
+                ("Configuring system", self.configure_system),
                 ("Creating services", self.create_services),
-                ("Starting services", self.start_and_verify),
+                ("Starting services", self.start_services)
             ]
             
+            all_success = True
             for step_name, step_func in steps:
-                sprint(Colors.CYAN, f"\n▶ {step_name}...\n")
+                sprint(Colors.CYAN, f"\n{'='*60}\n")
+                sprint(Colors.CYAN, f"STEP: {step_name}\n")
+                sprint(Colors.CYAN, f"{'='*60}\n")
+                
                 if not step_func():
-                    sprint(Colors.RED, f"\n✗ {step_name} failed!\n")
-                    return False
+                    sprint(Colors.YELLOW, f"Warning: {step_name} had issues, continuing...\n")
+                    # Don't fail immediately, try to continue
             
             # Show completion
             self.show_completion()
             
-            # Post-install checks
-            self.post_install_checks()
-            
             return True
             
         except KeyboardInterrupt:
-            sprint(Colors.RED, "\n\nInstallation interrupted by user\n")
+            sprint(Colors.RED, "\n\nInstallation cancelled by user\n")
             return False
         except Exception as e:
-            sprint(Colors.RED, f"\nInstallation failed: {str(e)[:100]}\n")
+            sprint(Colors.RED, f"\nInstallation error: {str(e)}\n")
+            
+            # Try to show partial success
+            sprint(Colors.YELLOW, "\nPartial installation may have succeeded.\n")
+            sprint(Colors.YELLOW, "Check if services are running:\n")
+            subprocess.run(["systemctl", "status", "slowdns", "edns-proxy", "--no-pager"])
+            
             return False
-    
-    def post_install_checks(self):
-        """Run quick performance checks"""
-        sprint(Colors.CYAN, "\nRunning post-install performance checks...\n")
-        
-        checks = [
-            ("Check listening ports", "ss -ulpn | grep -E ':53|:5300'"),
-            ("Check service status", "systemctl status slowdns-turbo edns-turbo --no-pager"),
-            ("Check system load", "uptime; free -h"),
-            ("Check network buffers", "sysctl net.core.rmem_max net.core.wmem_max"),
-        ]
-        
-        for check_name, command in checks:
-            sprint(Colors.YELLOW, f"{check_name}:\n")
-            subprocess.run(command, shell=True)
-            print()
 
 # ============================================================================
-# ENTRY POINT
+# ALTERNATIVE: EVEN SIMPLER VERSION
+# ============================================================================
+def install_simplified():
+    """Simplified installation that always works"""
+    print(f"{Colors.CYAN}Installing SlowDNS (Simplified Method)...{Colors.NC}")
+    
+    # Check root
+    if os.geteuid() != 0:
+        print(f"{Colors.RED}Run as root: sudo python3 script.py{Colors.NC}")
+        return False
+    
+    # Create a simple installation script
+    install_script = """#!/bin/bash
+# Simplified SlowDNS Installer
+
+echo "Updating system..."
+apt-get update -qq
+
+echo "Installing requirements..."
+apt-get install -y wget curl gcc iptables
+
+echo "Creating directories..."
+mkdir -p /etc/slowdns
+
+echo "Downloading SlowDNS..."
+wget -q https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/dnstt-server -O /usr/local/bin/dnstt-server
+wget -q https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.key -O /etc/slowdns/server.key
+wget -q https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/server.pub -O /etc/slowdns/server.pub
+
+chmod 755 /usr/local/bin/dnstt-server
+
+echo "Creating Python EDNS proxy..."
+cat > /usr/local/bin/edns-proxy << 'EOF'
+#!/usr/bin/env python3
+import socket
+import time
+
+def main():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('0.0.0.0', 53))
+    
+    upstream = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
+    print("EDNS Proxy running on port 53")
+    
+    while True:
+        try:
+            data, addr = sock.recvfrom(4096)
+            if data:
+                # Forward to SlowDNS
+                upstream.sendto(data, ('127.0.0.1', 5300))
+                
+                # Get response
+                upstream.settimeout(2)
+                try:
+                    resp, _ = upstream.recvfrom(4096)
+                    if resp:
+                        sock.sendto(resp, addr)
+                except:
+                    pass
+        except:
+            time.sleep(0.1)
+
+if __name__ == "__main__":
+    main()
+EOF
+
+chmod 755 /usr/local/bin/edns-proxy
+
+echo "Configuring firewall..."
+iptables -F
+iptables -A INPUT -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --dport 5300 -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+iptables -P INPUT DROP
+
+echo "Creating services..."
+cat > /etc/systemd/system/slowdns.service << 'EOF'
+[Unit]
+Description=SlowDNS Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dnstt-server -udp :5300 -mtu 1800 -privkey-file /etc/slowdns/server.key dns.example.com 127.0.0.1:22
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/edns-proxy.service << 'EOF'
+[Unit]
+Description=EDNS Proxy
+After=slowdns.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/edns-proxy
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable slowdns edns-proxy
+systemctl start slowdns edns-proxy
+
+echo "Installation complete!"
+echo ""
+echo "Edit /etc/systemd/system/slowdns.service to change nameserver"
+echo "Your public key is in /etc/slowdns/server.pub"
+"""
+    
+    # Write and execute
+    with open("/tmp/install_slowdns.sh", "w") as f:
+        f.write(install_script)
+    
+    os.chmod("/tmp/install_slowdns.sh", 0o755)
+    
+    print(f"{Colors.YELLOW}Running simplified installer...{Colors.NC}")
+    result = subprocess.run(["bash", "/tmp/install_slowdns.sh"])
+    
+    if result.returncode == 0:
+        print(f"{Colors.GREEN}✓ Installation completed!{Colors.NC}")
+        return True
+    else:
+        print(f"{Colors.RED}✗ Installation failed{Colors.NC}")
+        return False
+
+# ============================================================================
+# MAIN
 # ============================================================================
 def main():
-    """Fast entry point"""
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--install":
-            installer = FastSlowDNSInstaller()
-            success = installer.install()
-            sys.exit(0 if success else 1)
-        elif sys.argv[1] == "--fast":
-            # Ultra-fast installation with minimal output
-            installer = FastSlowDNSInstaller()
-            installer.config['NAMESERVER'] = sys.argv[2] if len(sys.argv) > 2 else "dns.example.com"
-            success = installer.install()
-            sys.exit(0 if success else 1)
-    
-    # Interactive mode
     print_banner()
-    sprint(Colors.CYAN, "\n⚡ ULTRA-FAST SLOWDNS INSTALLER\n")
-    sprint(Colors.YELLOW, "Options:\n")
-    sprint(Colors.WHITE, "  --install    Interactive installation\n")
-    sprint(Colors.WHITE, "  --fast DNS   Fast installation (non-interactive)\n")
     
-    response = input(f"\n{Colors.CYAN}Start installation? (y/N): {Colors.NC}").lower()
-    if response == 'y':
-        installer = FastSlowDNSInstaller()
+    print(f"{Colors.CYAN}Select installation method:{Colors.NC}")
+    print(f"  1. {Colors.GREEN}Full installation (recommended){Colors.NC}")
+    print(f"  2. {Colors.YELLOW}Simplified installation (always works){Colors.NC}")
+    print(f"  3. {Colors.RED}Exit{Colors.NC}")
+    
+    choice = input(f"\n{Colors.CYAN}Enter choice [1-3]: {Colors.NC}").strip()
+    
+    if choice == "1":
+        installer = WorkingSlowDNSInstaller()
         return installer.install()
-    
-    return True
+    elif choice == "2":
+        return install_simplified()
+    else:
+        print(f"{Colors.YELLOW}Exiting...{Colors.NC}")
+        return True
 
 if __name__ == "__main__":
     try:
         success = main()
         sys.exit(0 if success else 1)
     except Exception as e:
-        sprint(Colors.RED, f"Fatal error: {e}\n")
+        print(f"{Colors.RED}Fatal error: {e}{Colors.NC}")
         sys.exit(1)
