@@ -5,5 +5,6 @@
 Copy and paste this single command to install:
 
 ```bash
-apt update && apt install -y curl && cd /root && \
-curl -fsSL https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded.sh | bash
+apt update && apt install -y curl dos2unix
+cd /root
+curl -fsSL https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED/moded.sh -o moded.sh
