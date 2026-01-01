@@ -1,6 +1,6 @@
 # 🚀 FAST DNS HALOTEL TANZANIA 🇹🇿
 
-## script by esimfreegb  🔥
+## t.me/esimfreegb 🔥
 
 Copy and paste this single command to install:
 
