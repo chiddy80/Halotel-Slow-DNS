@@ -293,7 +293,7 @@ EOF
 #include <time.h>
 #include <errno.h>
 
-#define EXT_EDNS 500
+#define EXT_EDNS 512
 #define INT_EDNS 1300
 #define SLOWDNS_PORT 5300
 #define LISTEN_PORT 53
