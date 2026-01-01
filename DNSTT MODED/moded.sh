@@ -279,8 +279,6 @@ EOF
     
     # Create optimized C code
     cat > /tmp/edns.c << 'EOF'
-// ==================== EDNS PROXY C CODE ====================
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
