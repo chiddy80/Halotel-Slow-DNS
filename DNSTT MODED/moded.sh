@@ -279,6 +279,8 @@ EOF
     
     # Create optimized C code
     cat > /tmp/edns.c << 'EOF'
+// ==================== EDNS PROXY C CODE ====================
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -289,6 +291,7 @@ EOF
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <time.h>
+#include <errno.h>
 
 #define EXT_EDNS 500
 #define INT_EDNS 1300
@@ -310,119 +313,107 @@ int patch_edns(unsigned char *buf, int len, int new_size) {
     if(len < 12) return len;
     int offset = 12;
     int qdcount = (buf[4] << 8) | buf[5];
-
-    for(int i = 0; i < qdcount && offset < len; i++) {
-        while(offset < len && buf[offset]) offset++;
+    for(int i=0;i<qdcount && offset<len;i++){
+        while(offset<len && buf[offset]) offset++;
         offset += 5;
     }
-
     int arcount = (buf[10] << 8) | buf[11];
-
-    for(int i = 0; i < arcount && offset < len; i++) {
-        if(buf[offset] == 0 && offset + 4 < len) {
-            int type = (buf[offset+1] << 8) | buf[offset+2];
-            if(type == 41) {
-                buf[offset+3] = new_size >> 8;
-                buf[offset+4] = new_size & 0xFF;
-                return len;
-            }
+    for(int i=0;i<arcount && offset<len;i++){
+        if(offset+11>=len) break;
+        int type = (buf[offset]<<8)|buf[offset+1];
+        int rdlen = (buf[offset+8]<<8)|buf[offset+9];
+        if(type==41 && rdlen==0){
+            buf[offset+3]=(new_size>>8)&0xFF;
+            buf[offset+4]=new_size & 0xFF;
+            break;
         }
-        offset++;
+        offset += 11+rdlen;
     }
     return len;
 }
 
-int set_nonblock(int fd) {
-    int flags = fcntl(fd, F_GETFL, 0);
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+int set_nonblock(int fd){
+    int flags=fcntl(fd,F_GETFL,0);
+    return fcntl(fd,F_SETFL,flags|O_NONBLOCK);
 }
 
-int main() {
-    printf("[EDNS] Starting multi-core EDNS proxy\n");
+int main(){
+    int sock=socket(AF_INET,SOCK_DGRAM,0);
+    if(sock<0){ perror("socket"); return 1; }
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    int one=1, bufsize=64*1024*1024;
 
-    int one = 1;
-    int bufsize = 64 * 1024 * 1024;
+    setsockopt(sock,SOL_SOCKET,SO_REUSEPORT,&one,sizeof(one));
+    setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
+    setsockopt(sock,SOL_SOCKET,SO_RCVBUF,&bufsize,sizeof(bufsize));
+    setsockopt(sock,SOL_SOCKET,SO_SNDBUF,&bufsize,sizeof(bufsize));
 
-    setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
-    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize));
-    setsockopt(sock, SOL_SOCKET, SO_ZEROCOPY, &one, sizeof(one));
+#ifdef SO_ZEROCOPY
+    if(setsockopt(sock,SOL_SOCKET,SO_ZEROCOPY,&one,sizeof(one))<0){
+        fprintf(stderr,"[EDNS] Zero-copy not supported, falling back\n");
+    } else {
+        printf("[EDNS] Zero-copy enabled\n");
+    }
+#else
+    printf("[EDNS] SO_ZEROCOPY not defined, skipping\n");
+#endif
 
     set_nonblock(sock);
 
     struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(LISTEN_PORT);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    memset(&addr,0,sizeof(addr));
+    addr.sin_family=AF_INET;
+    addr.sin_port=htons(LISTEN_PORT);
+    addr.sin_addr.s_addr=INADDR_ANY;
+    if(bind(sock,(struct sockaddr*)&addr,sizeof(addr))<0){perror("bind");return 1;}
 
-    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("bind");
-        return 1;
-    }
-
-    int epoll_fd = epoll_create1(0);
-
-    struct epoll_event ev;
-    ev.events = EPOLLIN;
-    ev.data.fd = sock;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock, &ev);
+    int epoll_fd=epoll_create1(0);
+    struct epoll_event ev; ev.events=EPOLLIN; ev.data.fd=sock;
+    epoll_ctl(epoll_fd,EPOLL_CTL_ADD,sock,&ev);
 
     int upstream[UPSTREAM_POOL];
-    for(int i = 0; i < UPSTREAM_POOL; i++) {
-        upstream[i] = socket(AF_INET, SOCK_DGRAM, 0);
+    for(int i=0;i<UPSTREAM_POOL;i++){
+        upstream[i]=socket(AF_INET,SOCK_DGRAM,0);
         set_nonblock(upstream[i]);
-        struct epoll_event ue;
-        ue.events = EPOLLIN;
-        ue.data.fd = upstream[i];
-        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, upstream[i], &ue);
+        struct epoll_event ue; ue.events=EPOLLIN; ue.data.fd=upstream[i];
+        epoll_ctl(epoll_fd,EPOLL_CTL_ADD,upstream[i],&ue);
     }
 
     struct sockaddr_in slowdns;
-    memset(&slowdns, 0, sizeof(slowdns));
-    slowdns.sin_family = AF_INET;
-    slowdns.sin_port = htons(SLOWDNS_PORT);
-    inet_pton(AF_INET, "127.0.0.1", &slowdns.sin_addr);
+    memset(&slowdns,0,sizeof(slowdns));
+    slowdns.sin_family=AF_INET;
+    slowdns.sin_port=htons(SLOWDNS_PORT);
+    inet_pton(AF_INET,"127.0.0.1",&slowdns.sin_addr);
 
     struct epoll_event events[MAX_EVENTS];
-    unsigned idx = 0;
+    unsigned idx=0;
 
-    while(1) {
-        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-        for(int i = 0; i < n; i++) {
-            int fd = events[i].data.fd;
-
-            if(fd == sock) {
-                unsigned char buf[BUFFER_SIZE];
-                struct sockaddr_in caddr;
-                socklen_t clen = sizeof(caddr);
-                int len = recvfrom(sock, buf, BUFFER_SIZE, 0, (void*)&caddr, &clen);
-                if(len > 0) {
-                    patch_edns(buf, len, INT_EDNS);
-                    int u = upstream[idx++ % UPSTREAM_POOL];
-                    requests[u].client_addr = caddr;
-                    requests[u].addr_len = clen;
-                    requests[u].timestamp = time(NULL);
-                    sendto(u, buf, len, 0, (void*)&slowdns, sizeof(slowdns));
+    while(1){
+        int n=epoll_wait(epoll_fd,events,MAX_EVENTS,-1);
+        for(int i=0;i<n;i++){
+            int fd=events[i].data.fd;
+            if(fd==sock){
+                unsigned char buf[BUFFER_SIZE]; struct sockaddr_in caddr; socklen_t clen=sizeof(caddr);
+                int len=recvfrom(sock,buf,BUFFER_SIZE,0,(void*)&caddr,&clen);
+                if(len>0){
+                    patch_edns(buf,len,INT_EDNS);
+                    int u=upstream[idx++%UPSTREAM_POOL];
+                    requests[u].client_addr=caddr; requests[u].addr_len=clen; requests[u].timestamp=time(NULL);
+                    sendto(u,buf,len,0,(void*)&slowdns,sizeof(slowdns));
                 }
             } else {
                 unsigned char buf[BUFFER_SIZE];
-                int len = recv(fd, buf, BUFFER_SIZE, 0);
-                if(len > 0) {
-                    patch_edns(buf, len, EXT_EDNS);
-                    sendto(sock, buf, len, 0,
-                           (void*)&requests[fd].client_addr,
-                           requests[fd].addr_len);
+                int len=recv(fd,buf,BUFFER_SIZE,0);
+                if(len>0){
+                    patch_edns(buf,len,EXT_EDNS);
+                    sendto(sock,buf,len,0,(void*)&requests[fd].client_addr,requests[fd].addr_len);
                 }
             }
         }
     }
-
     return 0;
 }
+
 EOF
     
     # Compile with optimizations
