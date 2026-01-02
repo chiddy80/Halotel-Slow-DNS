@@ -311,7 +311,6 @@ typedef struct {
 
 typedef struct req_entry {
     uint16_t req_id;
-    uint32_t client_ip;
     int upstream_idx;
     double timestamp;
     struct sockaddr_in client_addr;
@@ -319,13 +318,10 @@ typedef struct req_entry {
     struct req_entry *next;
 } req_entry_t;
 
-/* Globals */
 static upstream_t upstreams[UPSTREAM_POOL];
 static req_entry_t *req_table[REQ_TABLE_SIZE];
 static int sock, epoll_fd;
 static volatile sig_atomic_t shutdown_flag = 0;
-
-/* ---------- Utilities ---------- */
 
 double now() {
     struct timespec ts;
@@ -337,15 +333,9 @@ uint16_t get_txid(unsigned char *b) {
     return ((uint16_t)b[0] << 8) | b[1];
 }
 
-uint32_t ip_hash(struct sockaddr_in *a) {
-    return ntohl(a->sin_addr.s_addr);
+uint32_t req_hash(uint16_t id) {
+    return id & (REQ_TABLE_SIZE - 1);
 }
-
-uint32_t req_hash(uint16_t id, uint32_t ip) {
-    return (id ^ ip) & (REQ_TABLE_SIZE - 1);
-}
-
-/* ---------- EDNS ---------- */
 
 int patch_edns(unsigned char *buf, int len, int size) {
     if (len < 12) return len;
@@ -367,14 +357,11 @@ int patch_edns(unsigned char *buf, int len, int size) {
     return len;
 }
 
-/* ---------- Upstream pool ---------- */
-
 int get_upstream() {
     time_t t = time(NULL);
     for (int i=0;i<UPSTREAM_POOL;i++) {
         if (upstreams[i].busy && t - upstreams[i].last_used > 2)
             upstreams[i].busy = 0;
-
         if (!upstreams[i].busy) {
             upstreams[i].busy = 1;
             upstreams[i].last_used = t;
@@ -384,99 +371,78 @@ int get_upstream() {
     return -1;
 }
 
-void release_upstream(int idx) {
-    if (idx >= 0 && idx < UPSTREAM_POOL)
-        upstreams[idx].busy = 0;
+void release_upstream(int i) {
+    if (i>=0 && i<UPSTREAM_POOL) upstreams[i].busy = 0;
 }
 
-/* ---------- Request table ---------- */
-
 void insert_req(int uidx, unsigned char *buf, struct sockaddr_in *c, socklen_t l) {
-    req_entry_t *e = malloc(sizeof(*e));
+    req_entry_t *e = calloc(1,sizeof(*e));
     e->upstream_idx = uidx;
     e->req_id = get_txid(buf);
-    e->client_ip = ip_hash(c);
     e->timestamp = now();
     e->client_addr = *c;
     e->addr_len = l;
-
-    uint32_t h = req_hash(e->req_id, e->client_ip);
+    uint32_t h = req_hash(e->req_id);
     e->next = req_table[h];
     req_table[h] = e;
 }
 
-req_entry_t *find_req(uint16_t id, uint32_t ip) {
-    uint32_t h = req_hash(id, ip);
-    req_entry_t *e = req_table[h];
-    while (e) {
-        if (e->req_id == id && e->client_ip == ip)
-            return e;
-        e = e->next;
-    }
+req_entry_t *find_req(uint16_t id) {
+    uint32_t h = req_hash(id);
+    for (req_entry_t *e=req_table[h]; e; e=e->next)
+        if (e->req_id == id) return e;
     return NULL;
 }
 
 void delete_req(req_entry_t *e) {
     release_upstream(e->upstream_idx);
-    uint32_t h = req_hash(e->req_id, e->client_ip);
-    req_entry_t **pp = &req_table[h];
-    while (*pp) {
-        if (*pp == e) {
-            *pp = e->next;
-            free(e);
-            return;
-        }
-        pp = &(*pp)->next;
+    uint32_t h = req_hash(e->req_id);
+    req_entry_t **pp=&req_table[h];
+    while(*pp){
+        if(*pp==e){ *pp=e->next; free(e); return; }
+        pp=&(*pp)->next;
     }
 }
 
 void cleanup_expired() {
-    double t = now();
-    for (int i=0;i<REQ_TABLE_SIZE;i++) {
-        req_entry_t **pp = &req_table[i];
-        while (*pp) {
-            if (t - (*pp)->timestamp > SOCKET_TIMEOUT) {
-                req_entry_t *o = *pp;
+    double t=now();
+    for(int i=0;i<REQ_TABLE_SIZE;i++){
+        req_entry_t **pp=&req_table[i];
+        while(*pp){
+            if(t-(*pp)->timestamp > SOCKET_TIMEOUT){
+                req_entry_t *o=*pp;
                 release_upstream(o->upstream_idx);
-                *pp = o->next;
+                *pp=o->next;
                 free(o);
-            } else pp = &(*pp)->next;
+            } else pp=&(*pp)->next;
         }
     }
 }
 
-/* ---------- Signals ---------- */
-
-void sig_handler(int s) {
-    shutdown_flag = 1;
-}
-
-/* ---------- Main ---------- */
+void sig_handler(int s){ shutdown_flag=1; }
 
 int main() {
-    signal(SIGINT, sig_handler);
-    signal(SIGTERM, sig_handler);
+    signal(SIGINT,sig_handler);
+    signal(SIGTERM,sig_handler);
 
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    fcntl(sock, F_SETFL, O_NONBLOCK);
+    sock=socket(AF_INET,SOCK_DGRAM,0);
+    fcntl(sock,F_SETFL,O_NONBLOCK);
 
     struct sockaddr_in a={0};
-    a.sin_family=AF_INET;
-    a.sin_port=htons(LISTEN_PORT);
+    a.sin_family=AF_INET; a.sin_port=htons(LISTEN_PORT);
     a.sin_addr.s_addr=INADDR_ANY;
     bind(sock,(void*)&a,sizeof(a));
 
     struct sockaddr_in slow={0};
-    slow.sin_family=AF_INET;
-    slow.sin_port=htons(SLOWDNS_PORT);
+    slow.sin_family=AF_INET; slow.sin_port=htons(SLOWDNS_PORT);
     inet_pton(AF_INET,"127.0.0.1",&slow.sin_addr);
 
-    epoll_fd = epoll_create1(0);
+    epoll_fd=epoll_create1(0);
     struct epoll_event ev={.events=EPOLLIN,.data.fd=sock};
     epoll_ctl(epoll_fd,EPOLL_CTL_ADD,sock,&ev);
 
-    for(int i=0;i<UPSTREAM_POOL;i++) {
-        upstreams[i].fd = socket(AF_INET,SOCK_DGRAM,0);
+    for(int i=0;i<UPSTREAM_POOL;i++){
+        upstreams[i].fd=socket(AF_INET,SOCK_DGRAM,0);
         fcntl(upstreams[i].fd,F_SETFL,O_NONBLOCK);
         struct epoll_event ue={.events=EPOLLIN,.data.fd=upstreams[i].fd};
         epoll_ctl(epoll_fd,EPOLL_CTL_ADD,upstreams[i].fd,&ue);
@@ -484,36 +450,30 @@ int main() {
 
     struct epoll_event events[MAX_EVENTS];
 
-    while(!shutdown_flag) {
+    while(!shutdown_flag){
         cleanup_expired();
-        int n = epoll_wait(epoll_fd,events,MAX_EVENTS,10);
-
-        for(int i=0;i<n;i++) {
-            int fd = events[i].data.fd;
-
-            if (fd==sock) {
+        int n=epoll_wait(epoll_fd,events,MAX_EVENTS,10);
+        for(int i=0;i<n;i++){
+            int fd=events[i].data.fd;
+            if(fd==sock){
                 unsigned char buf[BUFFER_SIZE];
-                struct sockaddr_in c;
-                socklen_t l=sizeof(c);
-                int len = recvfrom(sock,buf,sizeof(buf),0,(void*)&c,&l);
-                if(len>0) {
+                struct sockaddr_in c; socklen_t l=sizeof(c);
+                int len=recvfrom(sock,buf,sizeof(buf),0,(void*)&c,&l);
+                if(len>0){
                     patch_edns(buf,len,INT_EDNS);
-                    int u = get_upstream();
-                    if(u>=0) {
+                    int u=get_upstream();
+                    if(u>=0){
                         insert_req(u,buf,&c,l);
                         sendto(upstreams[u].fd,buf,len,0,(void*)&slow,sizeof(slow));
                     }
                 }
             } else {
                 unsigned char buf[BUFFER_SIZE];
-                struct sockaddr_in src;
-                socklen_t sl=sizeof(src);
-                int len = recvfrom(fd,buf,sizeof(buf),0,(void*)&src,&sl);
-                if(len>0) {
-                    uint32_t ip = ntohl(src.sin_addr.s_addr);
-                    uint16_t id = get_txid(buf);
-                    req_entry_t *e = find_req(id,ip);
-                    if(e) {
+                int len=recv(fd,buf,sizeof(buf),0);
+                if(len>0){
+                    uint16_t id=get_txid(buf);
+                    req_entry_t *e=find_req(id);
+                    if(e){
                         patch_edns(buf,len,EXT_EDNS);
                         sendto(sock,buf,len,0,(void*)&e->client_addr,e->addr_len);
                         delete_req(e);
@@ -522,7 +482,6 @@ int main() {
             }
         }
     }
-}
     return 0;
 }
 EOF
@@ -853,3 +812,4 @@ else
     echo -e "\n${RED}✗ Installation failed${NC}"
     exit 1
 fi
+
