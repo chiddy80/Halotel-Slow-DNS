@@ -279,225 +279,180 @@ EOF
     
     # Create optimized C code
     cat > /tmp/edns.c << 'EOF'
-
+    
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <signal.h>
 #include <time.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <errno.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include <sys/epoll.h>
+#include <sys/uio.h>
 
-#define LISTEN_PORT 53
-#define SLOWDNS_PORT 5300
-#define BUFFER_SIZE 4096
-#define UPSTREAM_POOL 32
-#define SOCKET_TIMEOUT 1.0
-#define MAX_EVENTS 4096
-#define REQ_TABLE_SIZE 65536
+/* ================= CONFIG ================= */
+#define LISTEN_PORT 5300
+#define BUF_SIZE 4096
+#define BATCH 64
+
+#define CACHE_BUCKETS 32768
+#define CACHE_MAX     8192
+#define CACHE_TTL     30
+#define AMP_LIMIT     1400
+
 #define EXT_EDNS 512
 #define INT_EDNS 1800
 
-typedef struct {
-    int fd;
-    int busy;
-    time_t last_used;
-} upstream_t;
+/* ================= GLOBAL ================= */
+static volatile sig_atomic_t stop = 0;
 
-typedef struct req_entry {
-    uint16_t req_id;
-    int upstream_idx;
-    double timestamp;
-    struct sockaddr_in client_addr;
-    socklen_t addr_len;
-    struct req_entry *next;
-} req_entry_t;
-
-static upstream_t upstreams[UPSTREAM_POOL];
-static req_entry_t *req_table[REQ_TABLE_SIZE];
-static int sock, epoll_fd;
-static volatile sig_atomic_t shutdown_flag = 0;
-
-double now() {
+/* ================= TIME ================= */
+static inline double now(){
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec / 1e9;
+    clock_gettime(CLOCK_MONOTONIC,&ts);
+    return ts.tv_sec + ts.tv_nsec/1e9;
 }
 
-uint16_t get_txid(unsigned char *b) {
-    return ((uint16_t)b[0] << 8) | b[1];
+/* ================= SIGNAL ================= */
+void handle_signal(int s){
+    stop = 1;
 }
 
-uint32_t req_hash(uint16_t id) {
-    return id & (REQ_TABLE_SIZE - 1);
+/* ================= HASH ================= */
+uint32_t dns_hash(const unsigned char *b,int l){
+    uint32_t h=2166136261u;
+    for(int i=12;i<l;i++) h=(h^b[i])*16777619;
+    return h;
 }
 
-int patch_edns(unsigned char *buf, int len, int size) {
-    if (len < 12) return len;
-    int off = 12;
-    int qd = (buf[4] << 8) | buf[5];
-    for (int i=0;i<qd;i++) {
-        while (buf[off]) off++;
-        off += 5;
-    }
-    int ar = (buf[10] << 8) | buf[11];
-    for (int i=0;i<ar;i++) {
-        if (buf[off]==0 && off+4<len && ((buf[off+1]<<8)|buf[off+2])==41) {
-            buf[off+3]=size>>8;
-            buf[off+4]=size&255;
-            return len;
-        }
-        off++;
-    }
-    return len;
-}
-
-int get_upstream() {
-    time_t t = time(NULL);
-    for (int i=0;i<UPSTREAM_POOL;i++) {
-        if (upstreams[i].busy && t - upstreams[i].last_used > 2)
-            upstreams[i].busy = 0;
-        if (!upstreams[i].busy) {
-            upstreams[i].busy = 1;
-            upstreams[i].last_used = t;
-            return i;
-        }
+/* ================= DNS PARSER ================= */
+int skip_name(const unsigned char *b,int off,int len){
+    while(off<len){
+        uint8_t l=b[off];
+        if(l==0) return off+1;
+        if((l&0xC0)==0xC0) return off+2;
+        if(l>63) return -1;
+        off+=l+1;
     }
     return -1;
 }
 
-void release_upstream(int i) {
-    if (i>=0 && i<UPSTREAM_POOL) upstreams[i].busy = 0;
+int patch_edns(unsigned char *buf,int len,int size){
+    if(len<12) return len;
+    int off=12;
+    int qd=(buf[4]<<8)|buf[5];
+    int an=(buf[6]<<8)|buf[7];
+    int ns=(buf[8]<<8)|buf[9];
+    int ar=(buf[10]<<8)|buf[11];
+
+    for(int i=0;i<qd;i++){
+        off=skip_name(buf,off,len);
+        if(off<0||off+4>len) return len;
+        off+=4;
+    }
+
+    for(int i=0;i<an+ns;i++){
+        off=skip_name(buf,off,len);
+        if(off<0||off+10>len) return len;
+        uint16_t rdlen=(buf[off+8]<<8)|buf[off+9];
+        off+=10+rdlen;
+    }
+
+    for(int i=0;i<ar;i++){
+        off=skip_name(buf,off,len);
+        if(off<0||off+10>len) return len;
+        uint16_t type=(buf[off]<<8)|buf[off+1];
+        if(type==41 && off+3<len){
+            buf[off+2]=size>>8;
+            buf[off+3]=size&255;
+            return len;
+        }
+        uint16_t rdlen=(buf[off+8]<<8)|buf[off+9];
+        off+=10+rdlen;
+    }
+    return len;
 }
 
-void insert_req(int uidx, unsigned char *buf, struct sockaddr_in *c, socklen_t l) {
-    req_entry_t *e = calloc(1,sizeof(*e));
-    e->upstream_idx = uidx;
-    e->req_id = get_txid(buf);
-    e->timestamp = now();
-    e->client_addr = *c;
-    e->addr_len = l;
-    uint32_t h = req_hash(e->req_id);
-    e->next = req_table[h];
-    req_table[h] = e;
+/* ================= CACHE ================= */
+typedef struct cache_entry{
+    uint32_t hash;
+    int len;
+    double ts;
+    unsigned char data[BUF_SIZE];
+    struct cache_entry *hnext,*prev,*next;
+} cache_entry_t;
+
+static cache_entry_t *cache[CACHE_BUCKETS];
+static cache_entry_t *lru_head=NULL,*lru_tail=NULL;
+static int cache_items=0;
+
+void lru_move(cache_entry_t *e){
+    if(e==lru_head) return;
+    if(e->prev) e->prev->next=e->next;
+    if(e->next) e->next->prev=e->prev;
+    if(e==lru_tail) lru_tail=e->prev;
+    e->prev=NULL;
+    e->next=lru_head;
+    if(lru_head) lru_head->prev=e;
+    lru_head=e;
+    if(!lru_tail) lru_tail=e;
 }
 
-req_entry_t *find_req(uint16_t id) {
-    uint32_t h = req_hash(id);
-    for (req_entry_t *e=req_table[h]; e; e=e->next)
-        if (e->req_id == id) return e;
+void cache_evict(){
+    if(!lru_tail) return;
+    cache_entry_t *e=lru_tail;
+    uint32_t idx=e->hash&(CACHE_BUCKETS-1);
+    cache_entry_t **pp=&cache[idx];
+    while(*pp && *pp!=e) pp=&(*pp)->hnext;
+    if(*pp) *pp=e->hnext;
+    lru_tail=e->prev;
+    if(lru_tail) lru_tail->next=NULL;
+    else lru_head=NULL;
+    free(e);
+    cache_items--;
+}
+
+cache_entry_t *cache_get(unsigned char *b,int l){
+    uint32_t h=dns_hash(b,l);
+    uint32_t idx=h&(CACHE_BUCKETS-1);
+    double t=now();
+    for(cache_entry_t *e=cache[idx];e;e=e->hnext){
+        if(e->hash==h && e->len==l && (t-e->ts)<CACHE_TTL){
+            lru_move(e);
+            return e;
+        }
+    }
     return NULL;
 }
 
-void delete_req(req_entry_t *e) {
-    release_upstream(e->upstream_idx);
-    uint32_t h = req_hash(e->req_id);
-    req_entry_t **pp=&req_table[h];
-    while(*pp){
-        if(*pp==e){ *pp=e->next; free(e); return; }
-        pp=&(*pp)->next;
-    }
+void cache_put(unsigned char *b,int l){
+    if(l>AMP_LIMIT) return;
+    while(cache_items>=CACHE_MAX) cache_evict();
+    cache_entry_t *e=malloc(sizeof(*e));
+    if(!e) return;  // safe on low memory
+    e->hash=dns_hash(b,l);
+    e->len=l;
+    e->ts=now();
+    memcpy(e->data,b,l);
+    uint32_t idx=e->hash&(CACHE_BUCKETS-1);
+    e->hnext=cache[idx];
+    cache[idx]=e;
+    e->prev=NULL;
+    e->next=lru_head;
+    if(lru_head) lru_head->prev=e;
+    lru_head=e;
+    if(!lru_tail) lru_tail=e;
+    cache_items++;
 }
 
-void cleanup_expired() {
-    double t=now();
-    for(int i=0;i<REQ_TABLE_SIZE;i++){
-        req_entry_t **pp=&req_table[i];
-        while(*pp){
-            if(t-(*pp)->timestamp > SOCKET_TIMEOUT){
-                req_entry_t *o=*pp;
-                release_upstream(o->upstream_idx);
-                *pp=o->next;
-                free(o);
-            } else pp=&(*pp)->next;
-        }
-    }
-}
+/* ================= CLEANUP ================= */
+void cleanup(){
+    cache_entry_t *e=lru_head,*n;
 
-void sig_handler(int s){ shutdown_flag=1; }
-
-int main() {
-    signal(SIGINT,sig_handler);
-    signal(SIGTERM,sig_handler);
-
-    sock=socket(AF_INET,SOCK_DGRAM,0);
-    fcntl(sock,F_SETFL,O_NONBLOCK);
-
-    struct sockaddr_in a={0};
-    a.sin_family=AF_INET; a.sin_port=htons(LISTEN_PORT);
-    a.sin_addr.s_addr=INADDR_ANY;
-    bind(sock,(void*)&a,sizeof(a));
-
-    struct sockaddr_in slow={0};
-    slow.sin_family=AF_INET; slow.sin_port=htons(SLOWDNS_PORT);
-    inet_pton(AF_INET,"127.0.0.1",&slow.sin_addr);
-
-    epoll_fd=epoll_create1(0);
-    struct epoll_event ev={.events=EPOLLIN,.data.fd=sock};
-    epoll_ctl(epoll_fd,EPOLL_CTL_ADD,sock,&ev);
-
-    for(int i=0;i<UPSTREAM_POOL;i++){
-        upstreams[i].fd=socket(AF_INET,SOCK_DGRAM,0);
-        fcntl(upstreams[i].fd,F_SETFL,O_NONBLOCK);
-        struct epoll_event ue={.events=EPOLLIN,.data.fd=upstreams[i].fd};
-        epoll_ctl(epoll_fd,EPOLL_CTL_ADD,upstreams[i].fd,&ue);
-    }
-
-    struct epoll_event events[MAX_EVENTS];
-
-    while(!shutdown_flag){
-        cleanup_expired();
-        int n=epoll_wait(epoll_fd,events,MAX_EVENTS,10);
-        for(int i=0;i<n;i++){
-            int fd=events[i].data.fd;
-            if(fd==sock){
-                unsigned char buf[BUFFER_SIZE];
-                struct sockaddr_in c; socklen_t l=sizeof(c);
-                int len=recvfrom(sock,buf,sizeof(buf),0,(void*)&c,&l);
-                if(len>0){
-                    patch_edns(buf,len,INT_EDNS);
-                    int u=get_upstream();
-                    if(u>=0){
-                        insert_req(u,buf,&c,l);
-                        sendto(upstreams[u].fd,buf,len,0,(void*)&slow,sizeof(slow));
-                    }
-                }
-            } else {
-                unsigned char buf[BUFFER_SIZE];
-                int len=recv(fd,buf,sizeof(buf),0);
-                if(len>0){
-                    uint16_t id=get_txid(buf);
-                    req_entry_t *e=find_req(id);
-                    if(e){
-                        patch_edns(buf,len,EXT_EDNS);
-                        sendto(sock,buf,len,0,(void*)&e->client_addr,e->addr_len);
-                        delete_req(e);
-                    }
-                }
-            }
-        }
-    }
-    return 0;
-}
-EOF
-    
-    # Compile with optimizations
-    echo -ne "  ${CYAN}Compiling EDNS Proxy with O3 optimizations...${NC}"
-    gcc -O3 -march=native -pipe /tmp/edns.c -o /usr/local/bin/edns-proxy 2>/tmp/compile.log &
-    show_progress $!
-    
-    if [ $? -eq 0 ]; then
-        chmod +x /usr/local/bin/edns-proxy
-        echo -e "\r  ${GREEN}EDNS Proxy compiled successfully${NC}"
-    else
-        echo -e "\r  ${RED}Compilation failed${NC}"
-        exit 1
-    fi
     
     # Create EDNS service
     cat > /etc/systemd/system/edns-proxy.service << EOF
@@ -812,6 +767,7 @@ else
     echo -e "\n${RED}✗ Installation failed${NC}"
     exit 1
 fi
+
 
 
 
