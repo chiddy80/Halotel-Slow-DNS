@@ -4,7 +4,7 @@
 #                     DROPBEAR SLOWDNS WITH EDNS PROXY
 # ============================================================================
 # Complete working script with:
-# 1. Dropbear SSH on port 2500
+# 1. Dropbear SSH on port 222
 # 2. SlowDNS tunnel
 # 3. EDNS Proxy for DNS forwarding
 # 4. All from chiddy80 GitHub repository
@@ -69,35 +69,35 @@ check_port() {
     return 0
 }
 
-free_port_443() {
-    print_info "Checking port 2500..."
+free_port_222() {
+    print_info "Checking port 222..."
     
-    if ! check_port 2500; then
-        print_warning "Port 2500 is in use. Attempting to free it..."
+    if ! check_port 222; then
+        print_warning "Port 222 is in use. Attempting to free it..."
         
         # Show what's using port 443
-        echo -e "  ${YELLOW}Processes on port 2500:${NC}"
-        ss -tlnp | grep ":2500 "
+        echo -e "  ${YELLOW}Processes on port 222:${NC}"
+        ss -tlnp | grep ":222 "
         
         # Stop common web servers
         systemctl stop nginx 2>/dev/null
         systemctl stop apache2 2>/dev/null
         systemctl stop httpd 2>/dev/null
         
-        # Kill any process on port 443
-        fuser -k 2500/tcp 2>/dev/null
+        # Kill any process on port 222
+        fuser -k 222/tcp 2>/dev/null
         sleep 2
         
         # Check again
-        if check_port 2500; then
-            print_success "Port 2500 freed successfully"
+        if check_port 222; then
+            print_success "Port 222 freed successfully"
             return 0
         else
-            print_error "Cannot free port 443"
+            print_error "Cannot free port 222"
             return 1
         fi
     else
-        print_success "Port 2500 is available"
+        print_success "Port 222 is available"
         return 0
     fi
 }
@@ -178,13 +178,13 @@ if [ -z "$NAMESERVER" ]; then
 fi
 
 # ============================================================================
-# STEP 1: FREE PORT 2500 FOR DROPBEAR
+# STEP 1: FREE PORT 222 FOR DROPBEAR
 # ============================================================================
-print_header "🔧 STEP 1: PREPARING PORT 2500"
+print_header "🔧 STEP 1: PREPARING PORT 222"
 
-if ! free_port_2500; then
-    print_warning "Using alternative port 222 for Dropbear"
-    DROPBEAR_PORT=222
+if ! free_port_222; then
+    print_warning "Using alternative port 444 for Dropbear"
+    DROPBEAR_PORT=444
 fi
 
 # ============================================================================
@@ -309,7 +309,7 @@ ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowd
 Restart=always
 RestartSec=5
 User=root
-LimitNOFILE=1048576
+LimitNOFILE=32768
 
 [Install]
 WantedBy=multi-user.target
@@ -351,7 +351,7 @@ cat > /tmp/edns_proxy.c << 'EOF'
 #define UPSTREAM_POOL 32
 #define SOCKET_TIMEOUT 1.0
 #define MAX_EVENTS 4096
-#define REQ_TABLE_SIZE 1048576
+#define REQ_TABLE_SIZE 32768
 #define EXT_EDNS 512
 #define INT_EDNS 1800
 
