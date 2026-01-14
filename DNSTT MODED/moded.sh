@@ -309,7 +309,7 @@ ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowd
 Restart=always
 RestartSec=5
 User=root
-LimitNOFILE=32768
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
@@ -351,7 +351,7 @@ cat > /tmp/edns_proxy.c << 'EOF'
 #define UPSTREAM_POOL 32
 #define SOCKET_TIMEOUT 1.0
 #define MAX_EVENTS 4096
-#define REQ_TABLE_SIZE 32768
+#define REQ_TABLE_SIZE 65535
 #define EXT_EDNS 512
 #define INT_EDNS 1800
 
@@ -571,7 +571,7 @@ ExecStart=/usr/local/bin/edns-proxy
 Restart=always
 RestartSec=3
 User=root
-LimitNOFILE=1048576
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
