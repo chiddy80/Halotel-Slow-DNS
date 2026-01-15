@@ -187,25 +187,28 @@ if ! free_port_222; then
     DROPBEAR_PORT=444
 fi
 # ============================================================================
-# STEP 2: INSTALL & FIX DROPBEAR
+# DROPBEAR FIX INSTALL
 # ============================================================================
-print_header "🔧 STEP 2: INSTALLING AND FIXING DROPBEAR"
+print_header "🔧 INSTALLING AND FIXING DROPBEAR"
 
-# Update packages
-print_info "Updating package list..."
-apt-get update -y >/dev/null 2>&1
-print_success "Package list updated"
+DROPBEAR_DIR="/etc/dropbear"
+
+# Ensure dropbear directory exists
+print_info "Ensuring dropbear directory exists..."
+mkdir -p $DROPBEAR_DIR
+chmod 700 $DROPBEAR_DIR
+print_success "$DROPBEAR_DIR ready"
 
 # Install dropbear if missing
-print_info "Installing Dropbear..."
 if ! command -v dropbear &>/dev/null; then
+    print_info "Installing Dropbear..."
     DEBIAN_FRONTEND=noninteractive apt-get install -y dropbear dropbear-key >/dev/null 2>&1
     print_success "Dropbear installed"
 else
-    print_success "Dropbear already installed"
+    print_info "Dropbear already installed"
 fi
 
-# Stop & clean previous Dropbear
+# Stop previous instances
 print_info "Stopping previous Dropbear instances..."
 pkill -x dropbear 2>/dev/null || true
 systemctl stop dropbear 2>/dev/null || true
@@ -213,45 +216,37 @@ systemctl disable dropbear 2>/dev/null || true
 systemctl mask dropbear 2>/dev/null || true
 print_success "Previous Dropbear cleaned"
 
-# Create dropbear directory with correct permissions
-mkdir -p /etc/dropbear
-chmod 700 /etc/dropbear
-
-# Generate host keys safely
+# Generate host keys
 for keytype in rsa ecdsa ed25519; do
-    keyfile="/etc/dropbear/dropbear_${keytype}_host_key"
+    keyfile="$DROPBEAR_DIR/dropbear_${keytype}_host_key"
     if [ ! -f "$keyfile" ] || [ ! -s "$keyfile" ]; then
         print_info "Generating $keytype host key..."
-        dropbearkey -t $keytype -f $keyfile >/dev/null 2>&1
-        if [ $? -eq 0 ]; then
+        if dropbearkey -t $keytype -f $keyfile >/dev/null 2>&1; then
             print_success "$keytype host key generated"
         else
             print_error "Failed to generate $keytype key"
-            ls -ld /etc/dropbear
-            ls -l /etc/dropbear
             exit 1
         fi
     else
-        print_info "$keytype host key already exists"
+        print_info "$keytype host key exists"
     fi
 done
 
-chmod 600 /etc/dropbear/dropbear_*_host_key
+chmod 600 $DROPBEAR_DIR/dropbear_*_host_key
 
-# Write Dropbear configuration (allow root login)
-print_info "Creating Dropbear configuration..."
+# Create default config (allow root login)
+print_info "Writing Dropbear config..."
 cat > /etc/default/dropbear << EOF
-# Dropbear SSH configuration
 NO_START=0
 DROPBEAR_PORT=$DROPBEAR_PORT
 DROPBEAR_EXTRA_ARGS="-F -E -s -j -k"
-DROPBEAR_BANNER="/etc/dropbear/banner"
 DROPBEAR_PASSWORD_AUTH="on"
+DROPBEAR_BANNER="/etc/dropbear/banner"
 EOF
-print_success "Configuration file created"
+print_success "Dropbear config written"
 
 # Create systemd service
-print_info "Creating Dropbear systemd service..."
+print_info "Creating systemd service..."
 cat > /etc/systemd/system/dropbear.service << EOF
 [Unit]
 Description=Dropbear SSH Server
@@ -263,10 +258,9 @@ Type=simple
 User=root
 EnvironmentFile=/etc/default/dropbear
 ExecStart=/usr/sbin/dropbear -p \${DROPBEAR_PORT} -F -E -s -j -k \\
- -r /etc/dropbear/dropbear_rsa_host_key \\
- -r /etc/dropbear/dropbear_ecdsa_host_key \\
- -r /etc/dropbear/dropbear_ed25519_host_key
-ExecReload=/bin/kill -HUP \$MAINPID
+ -r $DROPBEAR_DIR/dropbear_rsa_host_key \\
+ -r $DROPBEAR_DIR/dropbear_ecdsa_host_key \\
+ -r $DROPBEAR_DIR/dropbear_ed25519_host_key
 Restart=always
 RestartSec=2
 LimitNOFILE=1048576
@@ -282,19 +276,16 @@ print_success "Systemd service created"
 systemctl daemon-reload
 systemctl unmask dropbear 2>/dev/null || true
 systemctl enable dropbear
-print_info "Starting Dropbear service..."
-if systemctl start dropbear; then
-    sleep 2
-    if systemctl is-active --quiet dropbear; then
-        print_success "Dropbear is running on port $DROPBEAR_PORT"
-        ss -tlnp | grep dropbear || true
-    else
-        print_error "Dropbear failed to start!"
-        journalctl -u dropbear --no-pager -n 20
-        exit 1
-    fi
+systemctl start dropbear
+
+# Verify running
+sleep 2
+if systemctl is-active --quiet dropbear; then
+    print_success "Dropbear running on port $DROPBEAR_PORT"
+    ss -tlnp | grep dropbear || true
 else
-    print_error "Failed to start Dropbear service"
+    print_error "Dropbear failed to start!"
+    journalctl -u dropbear --no-pager -n 20
     exit 1
 fi
 # ============================================================================
