@@ -19,7 +19,7 @@ fi
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-DROPBEAR_PORT=2500
+DROPBEAR_PORT=222
 SLOWDNS_PORT=5300
 GITHUB_BASE="https://raw.githubusercontent.com/chiddy80/Halotel-Slow-DNS/main/DNSTT%20MODED"
 
@@ -75,7 +75,7 @@ free_port_222() {
     if ! check_port 222; then
         print_warning "Port 222 is in use. Attempting to free it..."
         
-        # Show what's using port 443
+        # Show what's using port 222
         echo -e "  ${YELLOW}Processes on port 222:${NC}"
         ss -tlnp | grep ":222 "
         
@@ -305,7 +305,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$DROPBEAR_PORT
+ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1500 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$DROPBEAR_PORT
 Restart=always
 RestartSec=5
 User=root
@@ -352,8 +352,8 @@ cat > /tmp/edns_proxy.c << 'EOF'
 #define SOCKET_TIMEOUT 1.0
 #define MAX_EVENTS 4096
 #define REQ_TABLE_SIZE 65535
-#define EXT_EDNS 512
-#define INT_EDNS 1800
+#define EXT_EDNS 500
+#define INT_EDNS 1500
 
 typedef struct {
     int fd;
