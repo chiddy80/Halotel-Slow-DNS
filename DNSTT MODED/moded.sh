@@ -188,70 +188,93 @@ if ! free_port_222; then
 fi
 
 # ============================================================================
-# STEP 2: INSTALL DROPBEAR
+# STEP 2: INSTALL & FIX DROPBEAR
 # ============================================================================
-print_header "🔧 STEP 2: INSTALLING DROPBEAR"
+print_header "🔧 STEP 2: INSTALLING AND CONFIGURING DROPBEAR"
 
+# Update package list
 print_info "Updating package list..."
-apt-get update > /dev/null 2>&1
+apt-get update -y >/dev/null 2>&1
 print_success "Package list updated"
 
+# Install Dropbear if not installed
 print_info "Installing Dropbear..."
-if ! command -v dropbear &> /dev/null; then
-    apt-get install -y dropbear dropbear-key > /dev/null 2>&1
+if ! command -v dropbear &>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y dropbear dropbear-key >/dev/null 2>&1
     print_success "Dropbear installed"
 else
     print_success "Dropbear already installed"
 fi
 
-# Stop any existing Dropbear
-print_info "Stopping existing Dropbear..."
-pkill dropbear 2>/dev/null
-systemctl stop dropbear 2>/dev/null
-print_success "Existing Dropbear stopped"
+# Stop any existing Dropbear instances
+print_info "Stopping previous Dropbear..."
+pkill -x dropbear 2>/dev/null || true
+systemctl stop dropbear 2>/dev/null || true
+systemctl disable dropbear 2>/dev/null || true
+systemctl mask dropbear 2>/dev/null || true
+print_success "Previous Dropbear cleaned"
 
-# Configure Dropbear
-print_info "Configuring Dropbear..."
+# Generate host keys safely
+mkdir -p /etc/dropbear
+chmod 700 /etc/dropbear
+for keytype in rsa ecdsa ed25519; do
+    keyfile="/etc/dropbear/dropbear_${keytype}_host_key"
+    if [ ! -f "$keyfile" ] || [ ! -s "$keyfile" ]; then
+        print_info "Generating $keytype host key..."
+        dropbearkey -t $keytype -f $keyfile >/dev/null 2>&1 && print_success "$keytype key generated" || print_warning "Failed $keytype key"
+    else
+        print_info "$keytype host key already exists"
+    fi
+done
+chmod 600 /etc/dropbear/dropbear_*_host_key
+
+# Configure Dropbear for root login
+print_info "Creating Dropbear configuration..."
 cat > /etc/default/dropbear << EOF
-# Dropbear SSH server configuration
-DROPBEAR_EXTRA_ARGS="-p $DROPBEAR_PORT -j -k"
 NO_START=0
+DROPBEAR_PORT=$DROPBEAR_PORT
+DROPBEAR_EXTRA_ARGS="-F -E -s -j -k"
 DROPBEAR_PASSWORD_AUTH="on"
 EOF
-print_success "Dropbear configured"
+print_success "Dropbear configuration written"
 
-# Generate host keys
-print_info "Generating host keys..."
-mkdir -p /etc/dropbear
-if [ ! -f /etc/dropbear/dropbear_rsa_host_key ]; then
-    dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key -s 2048 > /dev/null 2>&1
-    print_success "RSA host key generated"
-fi
+# Create systemd service
+print_info "Creating Dropbear systemd service..."
+cat > /etc/systemd/system/dropbear.service << EOF
+[Unit]
+Description=Dropbear SSH Server
+After=network.target
+Wants=network-online.target
 
-if [ ! -f /etc/dropbear/dropbear_ecdsa_host_key ]; then
-    dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key > /dev/null 2>&1
-    print_success "ECDSA host key generated"
-fi
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dropbear -F -E -p \$DROPBEAR_PORT -s -j -k \\
+ -r /etc/dropbear/dropbear_rsa_host_key \\
+ -r /etc/dropbear/dropbear_ecdsa_host_key \\
+ -r /etc/dropbear/dropbear_ed25519_host_key
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+StandardOutput=journal
+StandardError=journal
 
-# Start Dropbear
-print_info "Starting Dropbear..."
-dropbear -p $DROPBEAR_PORT -F -E > /dev/null 2>&1 &
+[Install]
+WantedBy=multi-user.target
+EOF
+print_success "Systemd service created"
+
+# Reload and start Dropbear
+systemctl daemon-reload
+systemctl unmask dropbear 2>/dev/null || true
+systemctl enable dropbear
+systemctl restart dropbear
 sleep 2
-
-if pgrep dropbear > /dev/null; then
-    print_success "Dropbear started on port $DROPBEAR_PORT"
+if systemctl is-active --quiet dropbear; then
+    print_success "Dropbear is running on port $DROPBEAR_PORT (root login allowed)"
 else
-    # Try service method
-    systemctl restart dropbear 2>/dev/null
-    sleep 2
-    if pgrep dropbear > /dev/null; then
-        print_success "Dropbear started via service"
-    else
-        print_error "Failed to start Dropbear"
-        exit 1
-    fi
+    print_error "Dropbear failed to start!"
+    journalctl -u dropbear --no-pager -n 20
 fi
-
 # ============================================================================
 # STEP 3: SETUP SLOWDNS
 # ============================================================================
