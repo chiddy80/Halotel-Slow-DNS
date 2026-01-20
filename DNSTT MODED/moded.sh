@@ -14,8 +14,8 @@ fi
 # ============================================================================
 # CONFIGURATION - OPTIMIZED VALUES
 # ============================================================================
-SSHD_PORT=2222                  # Changed from 22 for security
-SLOWDNS_PORT=5353               # Changed from 5300 to avoid conflicts
+SSHD_PORT=22                    # Changed from 22 for security
+SLOWDNS_PORT=5300               # Changed from 5353 to avoid conflicts
 EXT_EDNS_MTU=512                # EXTERNAL MTU (Internet-facing) - DO NOT CHANGE
 INT_EDNS_MTU=1800               # INTERNAL MTU (Local network) - DO NOT CHANGE
 UDP_TIMEOUT=30                  # Increased UDP timeout
@@ -932,3 +932,4 @@ else
 fi
 
 ```
+
