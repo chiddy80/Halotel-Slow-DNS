@@ -155,7 +155,7 @@ X11Forwarding no
 PrintMotd no
 PrintLastLog yes
 TCPKeepAlive yes
-ClientAliveInterval 60
+ClientAliveInterval 30
 ClientAliveCountMax 3
 AllowTcpForwarding yes
 GatewayPorts yes
@@ -247,7 +247,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1500 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
+ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
 Restart=always
 RestartSec=5
 User=root
@@ -295,13 +295,13 @@ EOF
 
 #define LISTEN_PORT 53
 #define SLOWDNS_PORT 5300
-#define BUFFER_SIZE 4096
-#define UPSTREAM_POOL 32
-#define SOCKET_TIMEOUT 1.0
-#define MAX_EVENTS 4096
+#define BUFFER_SIZE 8192
+#define UPSTREAM_POOL 64
+#define SOCKET_TIMEOUT 3.0
+#define MAX_EVENTS 8192
 #define REQ_TABLE_SIZE 65536
 #define EXT_EDNS 512
-#define INT_EDNS 1500
+#define INT_EDNS 1800
 
 typedef struct {
     int fd;
