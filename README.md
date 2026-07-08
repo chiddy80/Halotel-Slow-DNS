@@ -1,4 +1,4 @@
-# 🚀 FAST DNS HALOTEL TANZANIA 🇹🇿
+# 🚀 SCRIPT 
 
 t.me/esimfreegb 🔥
 
