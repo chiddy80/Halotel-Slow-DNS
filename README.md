@@ -1,4 +1,4 @@
-# 🚀 SCRIPT 
+# 🚀 DEAD SCRIPT 
 
 t.me/esimfreegb 🔥
 
